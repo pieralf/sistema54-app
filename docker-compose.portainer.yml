@@ -85,6 +85,28 @@ services:
       - "com.sistema54.service=frontend"
       - "com.sistema54.description=React Frontend per SISTEMA54"
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: sistema54_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@sistema54.local
+      PGADMIN_DEFAULT_PASSWORD: sistema54admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - sistema54_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - sistema54-network
+    labels:
+      - "com.sistema54.service=pgadmin"
+      - "com.sistema54.description=Interfaccia Web PostgreSQL (pgAdmin)"
+
 volumes:
   sistema54_postgres_data:
     driver: local
@@ -101,6 +123,11 @@ volumes:
     labels:
       - "com.sistema54.volume=frontend_node_modules"
       - "com.sistema54.description=Volume per node_modules frontend"
+  sistema54_pgadmin_data:
+    driver: local
+    labels:
+      - "com.sistema54.volume=pgadmin_data"
+      - "com.sistema54.description=Volume per dati pgAdmin (configurazioni, connessioni)"
 
 networks:
   sistema54-network:
