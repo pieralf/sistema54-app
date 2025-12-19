@@ -1,3 +1,8 @@
+version: '3.8'
+
+# Docker Compose per Portainer
+# Questo file è ottimizzato per l'uso con Portainer Stack
+
 services:
   db:
     image: postgres:15-alpine
@@ -25,17 +30,18 @@ services:
 
   backend:
     build:
-      context: .
-      dockerfile: ./backend/Dockerfile.portainer
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: sistema54_backend
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://admin:sistema54secure@db:5432/sistema54_db
-      PYTHONUNBUFFERED: "1"
+      PYTHONUNBUFFERED: 1
     ports:
       - "8000:8000"
     volumes:
-      - sistema54_backend_uploads:/app/uploads
+      - ./backend:/app
+      - ./backend/uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -43,7 +49,7 @@ services:
       - sistema54-network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/docs\")' || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -54,8 +60,8 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: ./frontend/Dockerfile.portainer
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: sistema54_frontend
     restart: unless-stopped
     environment:
@@ -64,14 +70,15 @@ services:
     ports:
       - "3000:5173"
     volumes:
-      - sistema54_frontend_node_modules:/app/node_modules
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
       - backend
     networks:
       - sistema54-network
     command: npm run dev -- --host 0.0.0.0
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5173 || exit 1"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5173"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -86,16 +93,6 @@ volumes:
     labels:
       - "com.sistema54.volume=postgres_data"
       - "com.sistema54.description=Volume per dati PostgreSQL"
-  sistema54_backend_uploads:
-    driver: local
-    labels:
-      - "com.sistema54.volume=backend_uploads"
-      - "com.sistema54.description=Volume per uploads backend (loghi, PDF)"
-  sistema54_frontend_node_modules:
-    driver: local
-    labels:
-      - "com.sistema54.volume=frontend_node_modules"
-      - "com.sistema54.description=Volume per node_modules frontend"
 
 networks:
   sistema54-network:
