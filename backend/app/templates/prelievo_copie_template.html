@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; line-height: 1.3; }
+        .bold { font-weight: bold; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .uppercase { text-transform: uppercase; }
+        .clearfix::after { content: ""; clear: both; display: table; }
+        .header { margin-bottom: 20px; border-bottom: 2px solid {{ azienda.colore_primario|default('#000') }}; padding-bottom: 10px; }
+        .header-left { float: left; width: 50%; }
+        .header-right { float: right; width: 50%; text-align: right; }
+        .logo-img { max-width: 180px; max-height: 60px; object-fit: contain; }
+        table.ricambi { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; }
+        table.ricambi th { border: 1px solid #000; background: #4F46E5; color: white; padding: 8px; font-size: 10px; text-align: left; font-weight: bold; }
+        table.ricambi td { border: 1px solid #000; padding: 6px; font-size: 10px; }
+        .firme { margin-top: 30px; width: 100%; }
+        .firma-line { border-top: 1px solid #000; width: 40%; padding-top: 5px; text-align: center; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header clearfix">
+        <div class="header-left">
+            {% if azienda.logo_url %}
+            <img src="{{ azienda.logo_url }}" alt="Logo" class="logo-img" />
+            {% endif %}
+            <div style="margin-top: 10px;">
+                <div class="bold uppercase">{{ azienda.nome_azienda|default('SISTEMA54') }}</div>
+                <div style="font-size: 9px;">{{ azienda.indirizzo_completo|default('') }}</div>
+                <div style="font-size: 9px;">{{ azienda.telefono|default('') }} - {{ azienda.email|default('') }}</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="bold uppercase" style="font-size: 14px;">PRELIEVO NUMERO COPIE</div>
+            <div style="margin-top: 10px;">
+                <div><strong>RIT:</strong> {{ rit.numero_relazione }}</div>
+                <div><strong>Data:</strong> {{ rit.data_creazione.strftime('%d/%m/%Y') if rit.data_creazione.strftime else rit.data_creazione }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+        <div class="bold" style="margin-bottom: 5px;">CLIENTE</div>
+        <div style="border: 1px solid #000; padding: 8px;">
+            <div><strong>{{ rit.cliente_ragione_sociale }}</strong></div>
+            <div>{{ rit.cliente_indirizzo }}</div>
+            {% if rit.cliente_piva %}<div>P.IVA: {{ rit.cliente_piva }}</div>{% endif %}
+        </div>
+    </div>
+
+    {% if rit.is_prelievo_copie and letture_copie_dettagli %}
+    <table class="ricambi">
+        <thead>
+            <tr>
+                <th colspan="5" style="text-align: center; background-color: #4F46E5; color: white; padding: 10px;">
+                    DETTAGLIO PRELIEVO COPIE
+                </th>
+            </tr>
+            <tr>
+                <th width="20%">DATA LETTURA</th>
+                <th width="20%">CONTATORE B/N</th>
+                <th width="20%">CONTATORE COLORE</th>
+                <th width="40%">DETTAGLIO CALCOLO</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for lettura in letture_copie_dettagli %}
+            <tr>
+                <td class="text-center">{{ lettura.data_lettura.strftime('%d/%m/%Y %H:%M') if lettura.data_lettura.strftime else lettura.data_lettura }}</td>
+                <td class="text-center">{{ lettura.contatore_bn }}</td>
+                <td class="text-center">{{ lettura.contatore_colore or 0 }}</td>
+                <td style="font-size: 9px; padding: 4px;">
+                    {% if lettura.note %}
+                        {% set note_lines = lettura.note.split('\n') %}
+                        {% for line in note_lines %}
+                            {% if line.strip() %}
+                                {{ line.strip() }}<br>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if hide_firme is not defined or not hide_firme %}
+    <div class="firme clearfix">
+        <div style="float: left; width: 45%;">
+            {% if rit.firma_tecnico %}
+            <div style="margin-bottom: 10px;">
+                <img src="{{ rit.firma_tecnico }}" style="max-width: 100%; max-height: 60px; object-fit: contain;" />
+            </div>
+            {% endif %}
+            <div class="firma-line">
+                <div style="font-size: 9px; margin-top: 5px;">Firma Tecnico</div>
+            </div>
+        </div>
+        <div style="float: right; width: 45%;">
+            {% if rit.firma_cliente %}
+            <div style="margin-bottom: 10px;">
+                <img src="{{ rit.firma_cliente }}" style="max-width: 100%; max-height: 60px; object-fit: contain;" />
+            </div>
+            {% endif %}
+            <div class="firma-line">
+                <div style="font-size: 9px; margin-top: 5px;">Firma Cliente</div>
+                {% if rit.nome_cliente or rit.cognome_cliente %}
+                <div style="font-size: 8px; margin-top: 3px;">{{ rit.nome_cliente }} {{ rit.cognome_cliente }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    {% if azienda.testo_privacy %}
+    <div style="margin-top: 20px; font-size: 7px; text-align: justify; line-height: 1.3; color: #333; padding: 10px; border-top: 1px solid #ccc;">
+        {{ azienda.testo_privacy }}
+    </div>
+    {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</body>
+</html>
+

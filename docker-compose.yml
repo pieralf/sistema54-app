@@ -1,0 +1,71 @@
+# Docker Compose per Docker Desktop e sviluppo locale
+# Per Portainer, usa docker-compose.portainer.yml
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: sistema54_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: sistema54secure
+      POSTGRES_DB: sistema54_db
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - sistema54-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sistema54_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://admin:sistema54secure@db:5432/sistema54_db
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - sistema54-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sistema54_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - sistema54-network
+    command: npm run dev -- --host 0.0.0.0
+
+networks:
+  sistema54-network:
+    driver: bridge
+
+
+

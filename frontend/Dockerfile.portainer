@@ -1,0 +1,23 @@
+# Dockerfile per Portainer - usa context root
+# Questo Dockerfile deve essere usato quando il build context è la root del progetto
+
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copia i file di definizione delle dipendenze (path relativo alla root)
+COPY frontend/package.json frontend/package-lock.json* ./
+
+# Installa le dipendenze base
+RUN npm install
+
+# Installa esplicitamente react-signature-canvas
+RUN npm install react-signature-canvas
+
+# Copia il resto del codice sorgente frontend
+COPY frontend/ .
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+

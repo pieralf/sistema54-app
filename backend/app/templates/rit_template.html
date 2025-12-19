@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* RESET E BASE */
+        body { font-family: Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; padding: 0; line-height: 1.3; }
+        
+        /* UTILITY */
+        .bold { font-weight: bold; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .uppercase { text-transform: uppercase; }
+        .clearfix::after { content: ""; clear: both; display: table; } /* FONDAMENTALE PER EVITARE SOVRAPPOSIZIONI */
+        
+        /* BOX GENERALE */
+        .box { border: 1px solid #000; padding: 5px; margin-bottom: 5px; background: #fff; }
+        .label-header { background: #eee; border: 1px solid #000; border-bottom: 0; padding: 2px 5px; font-weight: bold; font-size: 9px; text-transform: uppercase; }
+        .data-content { border: 1px solid #000; padding: 5px; margin-bottom: 5px; min-height: 15px; }
+        table.grid td.data-content { padding: 5px !important; }
+
+        /* HEADER */
+        .header { margin-bottom: 20px; border-bottom: 2px solid {{ azienda.colore_primario|default('#000') }}; padding-bottom: 10px; }
+        .header-left { float: left; width: 50%; }
+        .header-right { float: right; width: 50%; text-align: right; }
+        .logo-img { max-width: 180px; max-height: 60px; object-fit: contain; }
+
+        /* GRIGLIE (CLIENTE / APPARECCHIO) */
+        table.grid { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+        table.grid td { vertical-align: top; padding: 0; }
+        .col-left { padding-right: 5px; }
+        .col-right { padding-left: 5px; }
+
+        /* CHECKBOXES */
+        .checkbox-container { display: inline-block; margin-right: 15px; }
+        .check-box { display: inline-block; width: 10px; height: 10px; border: 1px solid #000; margin-right: 3px; vertical-align: middle; text-align: center; line-height: 9px; font-size: 8px; }
+
+        /* TABELLA RICAMBI */
+        table.ricambi { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; }
+        table.ricambi th { border: 1px solid #000; background: #eee; padding: 4px; font-size: 9px; text-align: left; }
+        table.ricambi td { border: 1px solid #000; padding: 4px; font-size: 10px; }
+
+        /* SEZIONE TOTALI (Il punto critico risolto) */
+        .footer-section { margin-top: 10px; page-break-inside: avoid; }
+        .times-box { float: left; width: 55%; border: 1px solid #000; padding: 5px; font-size: 10px; }
+        .totals-table { float: right; width: 40%; border-collapse: collapse; }
+        .totals-table td { border: 1px solid #000; padding: 5px; }
+        
+        /* DISCLAIMER E FIRME */
+        .disclaimer { margin-top: 15px; font-size: 9px; text-align: justify; font-style: italic; color: #333; }
+        .firme { margin-top: 30px; width: 100%; }
+        .firma-line { border-top: 1px solid #000; width: 40%; padding-top: 5px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div class="header clearfix">
+        <div class="header-left">
+            {% if azienda.logo_url %}
+                <img src="{{ azienda.logo_url }}" class="logo-img">
+            {% endif %}
+            <h1 style="margin:0; font-size: 20px; margin-top: {% if azienda.logo_url %}5px{% else %}0{% endif %};">{{ azienda.nome_azienda }}</h1>
+            <div style="font-size: 10px; margin-top: 5px;">
+                {{ azienda.indirizzo_completo }}<br>
+                {% if azienda.p_iva %}P.IVA: {{ azienda.p_iva }}{% endif %}
+                {% if azienda.telefono %} | Tel: {{ azienda.telefono }}{% endif %}<br>
+                {{ azienda.email }}
+            </div>
+        </div>
+        <div class="header-right">
+            <h3 style="margin:0; color: {{ azienda.colore_primario|default('#000') }};">RELAZIONE INTERVENTO TECNICO</h3>
+            <div style="font-size: 14px; font-weight: bold;">N. {{ rit.numero_relazione }}</div>
+            <div style="margin-top: 5px;">Data: {{ rit.data_creazione.strftime('%d/%m/%Y') }}</div>
+        </div>
+    </div>
+
+    <table class="grid">
+        <tr>
+            <td width="50%" class="col-left">
+                <div class="label-header">CLIENTE / RAGIONE SOCIALE</div>
+                <div class="data-content">
+                    <div class="bold">{{ rit.cliente_ragione_sociale }}</div>
+                    <div>{{ rit.cliente_indirizzo }}</div>
+                    {% if rit.cliente_piva %}<div>P.IVA: {{ rit.cliente_piva }}</div>{% endif %}
+                </div>
+            </td>
+            <td width="50%" class="col-right">
+                <div class="label-header">UBICAZIONE INTERVENTO</div>
+                <div class="data-content">
+                    {% if rit.sede_indirizzo %}
+                        {% if rit.sede_nome %}
+                            <strong>{{ rit.sede_nome }}</strong><br>
+                        {% endif %}
+                        {{ rit.sede_indirizzo }}
+                    {% elif rit.cliente_indirizzo %}
+                        {{ rit.cliente_indirizzo }}
+                    {% else %}
+                        Non specificata
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <table class="grid">
+        <tr>
+            <td width="100%">
+                <div class="data-content" style="min-height: 40px; display: flex; align-items: center; justify-content: space-around; margin-bottom: 12px;">
+                    <div class="checkbox-container">
+                        <span class="check-box">{% if rit.is_contratto %}X{% endif %}</span> Contratto
+                    </div>
+                    <div class="checkbox-container">
+                        <span class="check-box">{% if rit.is_garanzia %}X{% endif %}</span> Garanzia
+                    </div>
+                    <div class="checkbox-container">
+                        <span class="check-box">{% if rit.is_chiamata %}X{% endif %}</span> Chiamata
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    {% if rit.dettagli %}
+    <table class="grid" style="margin-top: 10px;">
+        <thead>
+            <tr>
+                <th class="label-header" style="width: 40%; padding: 2px 5px;">PRODOTTO</th>
+                <th class="label-header" style="width: 30%; padding: 2px 5px;">SERIAL NUMBER</th>
+                <th class="label-header" style="width: 30%; padding: 2px 5px;">PART NUMBER</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for det in rit.dettagli %}
+            <tr>
+                <td class="data-content" style="width: 40%; padding: 5px; vertical-align: top;">
+                    <strong>{{ det.marca_modello }}</strong>
+                    {% if det.dati_tecnici %}
+                        {% if det.dati_tecnici.get('matricola') %}<br>Matricola: {{ det.dati_tecnici.matricola }}{% endif %}
+                        {% if det.dati_tecnici.get('contatori_bn') %}<br>Contatori B/N: {{ det.dati_tecnici.contatori_bn }}{% endif %}
+                        {% if det.dati_tecnici.get('contatori_colore') %}<br>Colore: {{ det.dati_tecnici.contatori_colore }}{% endif %}
+                    {% endif %}
+                </td>
+                <td class="data-content" style="width: 30%; padding: 5px; vertical-align: top;">
+                    {% if det.serial_number %}{{ det.serial_number }}{% else %}-{% endif %}
+                </td>
+                <td class="data-content" style="width: 30%; padding: 5px; vertical-align: top;">
+                    {% if det.part_number %}{{ det.part_number }}{% else %}-{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <div class="label-header">DIFETTO SEGNALATO</div>
+    <div class="data-content">
+        {% if rit.difetto_segnalato %}
+            {{ rit.difetto_segnalato }}
+        {% else %}
+            -
+        {% endif %}
+    </div>
+
+    <div class="label-header">LAVORO ESEGUITO</div>
+    <div class="data-content" style="min-height: 50px;">
+        {% if rit.dettagli %}
+            {% for det in rit.dettagli %}
+                {% if det.descrizione_lavoro and det.descrizione_lavoro != '-' %}
+                    <div style="margin-bottom: 5px;">{{ det.descrizione_lavoro }}</div>
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            -
+        {% endif %}
+    </div>
+
+    <table class="ricambi">
+        <thead>
+            <tr>
+                <th width="50%">PEZZI SOSTITUITI</th>
+                <th width="10%" class="text-center">Q.TA'</th>
+                <th width="20%" class="text-right">PREZZO UN.</th>
+                <th width="20%" class="text-right">IMPORTO</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pezzo in rit.ricambi_utilizzati %}
+            <tr>
+                <td>{{ pezzo.descrizione }}</td>
+                <td class="text-center">{{ pezzo.quantita }}</td>
+                <td class="text-right">€ {{ "%.2f"|format(pezzo.prezzo_unitario) }}</td>
+                <td class="text-right">€ {{ "%.2f"|format(pezzo.quantita * pezzo.prezzo_unitario) }}</td>
+            </tr>
+            {% endfor %}
+            {% if not rit.ricambi_utilizzati %}
+            <tr><td colspan="4" style="padding:10px; text-align:center; color:#999;">Nessun ricambio utilizzato</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    {% if rit.descrizione_extra and costi_extra_manuale > 0 %}
+    <table class="ricambi" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th width="60%">COSTI EXTRA</th>
+                <th width="20%" class="text-right">PREZZO UN.</th>
+                <th width="20%" class="text-right">IMPORTO</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>{{ rit.descrizione_extra }}</td>
+                <td class="text-right">€ {{ "%.2f"|format(costi_extra_manuale) }}</td>
+                <td class="text-right">€ {{ "%.2f"|format(costi_extra_manuale) }}</td>
+            </tr>
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if rit.is_prelievo_copie and letture_copie_dettagli %}
+    <table class="ricambi" style="margin-top: 15px;">
+        <thead>
+            <tr>
+                <th colspan="4" style="background-color: #4F46E5; color: white; padding: 8px; text-align: center;">
+                    DETTAGLIO PRELIEVO COPIE
+                </th>
+            </tr>
+            <tr>
+                <th width="25%">DATA LETTURA</th>
+                <th width="25%">CONTATORE B/N</th>
+                <th width="25%">CONTATORE COLORE</th>
+                <th width="25%">DETTAGLIO CALCOLO</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for lettura in letture_copie_dettagli %}
+            <tr>
+                <td>{{ lettura.data_lettura.strftime('%d/%m/%Y %H:%M') if lettura.data_lettura.strftime else lettura.data_lettura }}</td>
+                <td class="text-center">{{ lettura.contatore_bn }}</td>
+                <td class="text-center">{{ lettura.contatore_colore or 0 }}</td>
+                <td style="font-size: 8px; padding: 4px;">
+                    {% if lettura.note %}
+                        {% set note_lines = lettura.note.split('\n') %}
+                        {% for line in note_lines %}
+                            {% if line.strip() %}
+                                {{ line.strip() }}<br>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <div class="footer-section clearfix">
+        <div class="times-box">
+            <div style="margin-bottom: 5px;"><strong>TEMPO IMPIEGATO PER L'INTERVENTO</strong></div>
+            {% if rit.ora_inizio and rit.ora_fine %}
+            <div style="margin-bottom: 5px;">
+                Ora Inizio: {% if rit.ora_inizio.strftime %}{{ rit.ora_inizio.strftime('%H:%M') }}{% else %}{{ rit.ora_inizio }}{% endif %} | 
+                Ora Fine: {% if rit.ora_fine.strftime %}{{ rit.ora_fine.strftime('%H:%M') }}{% else %}{{ rit.ora_fine }}{% endif %}<br>
+                Monte Ore: {{ "%.2f"|format(monte_ore) }} ore<br>
+                {% if diff_minuti > 0 %}
+                ({{ diff_minuti }} minuti = {{ "%.2f"|format(monte_ore) }} ore - calcolo frazionato: ogni 30 min = 0.5 ore)<br>
+                {% endif %}
+                Costo Orario: € {{ "%.2f"|format(costo_orario) }}/ora ({{ rit.macro_categoria.value }})<br>
+                Costo Ore Lavorate: € {{ "%.2f"|format(costo_ore) }}
+                {% if is_contratto_o_prelievo %}
+                <br><span style="color: #666; font-size: 9px; font-style: italic;">(Ore non conteggiate nel totale - Contratto/Prelievo Copie)</span>
+                {% endif %}
+            </div>
+            {% if rit.flag_diritto_chiamata %}
+            <div style="margin-top: 5px;">
+                Diritto Fisso di Chiamata: € {{ "%.2f"|format(rit.costo_chiamata_applicato) }}
+            </div>
+            {% endif %}
+            {% if rit.is_contratto and rit.limite_chiamate_contratto is not none %}
+            <div style="margin-top: 10px; padding: 5px; background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 3px;">
+                <strong>CONTRATTO ASSISTENZA - CHIAMATE DISPONIBILI</strong><br>
+                Chiamate Scalate: {{ rit.chiamate_utilizzate_contratto or 0 }} / {{ rit.limite_chiamate_contratto }}<br>
+                Chiamate Rimanenti: {{ rit.chiamate_rimanenti_contratto or 0 }}
+            </div>
+            {% endif %}
+            {% else %}
+            Ora Inizio: --:-- | Ora Fine: --:--<br>
+            Monte Ore: 0.00 ore<br>
+            Costo Orario: € {{ "%.2f"|format(costo_orario) }}/ora ({{ rit.macro_categoria.value }})<br>
+            Costo Ore Lavorate: € 0.00<br>
+            {% endif %}
+        </div>
+
+        <table class="totals-table">
+            <tr>
+                <td><strong>IMPONIBILE</strong></td>
+                <td class="text-right">€ {{ "%.2f"|format(imponibile) }}</td>
+            </tr>
+            <tr>
+                <td>IVA (22%)</td>
+                <td class="text-right">€ {{ "%.2f"|format(iva) }}</td>
+            </tr>
+            <tr>
+                <td style="background: #eee;"><strong>TOTALE</strong></td>
+                <td class="text-right bold">€ {{ "%.2f"|format(totale) }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <table class="firme">
+        <tr>
+            <td width="10%"></td>
+            <td style="vertical-align: top; width: 40%; text-align: center;">
+                {% if rit.firma_tecnico %}
+                <div style="margin-bottom: 10px;">
+                    <img src="{{ rit.firma_tecnico }}" style="max-width: 100%; max-height: 60px; object-fit: contain;" />
+                </div>
+                {% endif %}
+                <div style="font-size: 9px; margin-bottom: 5px;">
+                    Firma Digitalizzata<br>Tecnico
+                </div>
+                <div style="border-top: 1px solid #000; padding-top: 5px; margin-top: 5px;"></div>
+            </td>
+            <td width="10%"></td>
+            <td style="vertical-align: top; width: 40%; text-align: center;">
+                {% if rit.firma_cliente %}
+                <div style="margin-bottom: 10px;">
+                    <img src="{{ rit.firma_cliente }}" style="max-width: 100%; max-height: 60px; object-fit: contain;" />
+                </div>
+                {% endif %}
+                {% if rit.nome_cliente or rit.cognome_cliente %}
+                <div style="font-size: 9px; margin-bottom: 10px;">
+                    {{ rit.nome_cliente|default('') }} {{ rit.cognome_cliente|default('') }}
+                </div>
+                {% endif %}
+                <div style="font-size: 9px; margin-bottom: 5px;">
+                    Firma Digitalizzata<br>Cliente
+                </div>
+                <div style="border-top: 1px solid #000; padding-top: 5px; margin-top: 5px;"></div>
+            </td>
+            <td width="10%"></td>
+        </tr>
+    </table>
+
+    {% if azienda.testo_privacy %}
+    <div class="disclaimer" style="margin-top: 20px;">
+        {{ azienda.testo_privacy }}
+    </div>
+    {% endif %}
+
+</body>
+</html>
