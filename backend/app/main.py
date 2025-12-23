@@ -1276,6 +1276,16 @@ def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
     
     update_data = prodotto.model_dump(exclude_unset=True)
+    
+    # Verifica che codice_articolo non sia duplicato (se viene aggiornato)
+    if 'codice_articolo' in update_data and update_data['codice_articolo']:
+        existing = db.query(models.ProdottoMagazzino).filter(
+            models.ProdottoMagazzino.codice_articolo == update_data['codice_articolo'],
+            models.ProdottoMagazzino.id != prodotto_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Codice articolo già esistente per un altro prodotto")
+    
     for key, value in update_data.items():
         setattr(db_prodotto, key, value)
     
