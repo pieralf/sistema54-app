@@ -119,14 +119,14 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({ token: state.token, user: state.user })
     }
   )
 );
 
 // Inizializza header se c'è un token salvato
-const storedToken = localStorage.getItem('auth-storage');
+const storedToken = sessionStorage.getItem('auth-storage');
 if (storedToken) {
   try {
     const parsed = JSON.parse(storedToken);
