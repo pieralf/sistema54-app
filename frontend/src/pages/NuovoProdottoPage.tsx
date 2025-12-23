@@ -11,7 +11,6 @@ export default function NuovoProdottoPage() {
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
-  const [originalCodiceArticolo, setOriginalCodiceArticolo] = useState<string>('');
   const isEdit = !!id;
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
@@ -36,7 +35,6 @@ export default function NuovoProdottoPage() {
       const res = await axios.get(`${getApiUrl()}/magazzino/`);
       const prodotto = res.data.find((p: any) => p.id === parseInt(id!));
       if (prodotto) {
-        setOriginalCodiceArticolo(prodotto.codice_articolo || '');
         setValue('codice_articolo', prodotto.codice_articolo || '');
         setValue('descrizione', prodotto.descrizione || '');
         setValue('prezzo_vendita', prodotto.prezzo_vendita || 0);
@@ -56,7 +54,7 @@ export default function NuovoProdottoPage() {
     try {
       if (isEdit) {
         await axios.put(`${getApiUrl()}/magazzino/${id}`, {
-          codice_articolo: originalCodiceArticolo || data.codice_articolo,
+          codice_articolo: data.codice_articolo,
           descrizione: data.descrizione,
           prezzo_vendita: parseFloat(data.prezzo_vendita) || 0,
           costo_acquisto: parseFloat(data.costo_acquisto) || 0,
@@ -126,10 +124,8 @@ export default function NuovoProdottoPage() {
             <IOSInput
               label="Codice Articolo *"
               {...register('codice_articolo', { 
-                required: isEdit ? false : 'Campo obbligatorio'
+                required: 'Campo obbligatorio'
               })}
-              disabled={isEdit}
-              readOnly={isEdit}
             />
             {errors.codice_articolo && (
               <p className="text-red-500 text-xs mt-1 ml-1">{String(errors.codice_articolo.message)}</p>
