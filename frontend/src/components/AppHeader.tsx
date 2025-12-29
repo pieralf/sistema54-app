@@ -1,5 +1,6 @@
 import { Home, ChevronLeft, LogOut } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import { useAuthStore } from '../store/authStore';
 import { getApiUrl } from '../config/api';
@@ -13,6 +14,7 @@ interface AppHeaderProps {
 
 export default function AppHeader({ title, showBack = true, showHome = true, rightContent }: AppHeaderProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { settings } = useSettingsStore();
   const { logout, isAuthenticated } = useAuthStore();
   const logoUrl = settings?.logo_url || '';
@@ -23,6 +25,12 @@ export default function AppHeader({ title, showBack = true, showHome = true, rig
       logout();
       navigate('/login');
     }
+  };
+
+  const handleBack = () => {
+    // Usa navigate(-1) di React Router che gestisce correttamente la history del browser
+    // Questo funziona anche quando si naviga tra tab nella stessa pagina
+    navigate(-1);
   };
 
   return (
@@ -40,13 +48,7 @@ export default function AppHeader({ title, showBack = true, showHome = true, rig
           )}
           {showBack && (
             <button
-              onClick={() => {
-                if (window.history.length > 1) {
-                  window.history.back();
-                } else {
-                  navigate('/');
-                }
-              }}
+              onClick={handleBack}
               className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-all"
               title="Torna indietro"
             >

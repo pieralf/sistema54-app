@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, Users, Building2, FileText, Search, Plus, Edit, Trash2, Shield, Package, Home, LogOut } from 'lucide-react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -22,9 +22,13 @@ export default function AdminPage() {
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
 
+  // Aggiorna activeTab quando cambiano i query params (es. navigazione indietro)
   useEffect(() => {
-    setSearchParams({ tab: activeTab });
-  }, [activeTab]);
+    const tabFromParams = (searchParams.get('tab') as any) || 'users';
+    if (tabFromParams !== activeTab) {
+      setActiveTab(tabFromParams);
+    }
+  }, [searchParams]);
 
   // Carica tutti i contatori all'avvio (per mostrare i numeri nelle tab)
   const loadAllCounts = async () => {
@@ -129,7 +133,10 @@ export default function AdminPage() {
 
   const TabButton = ({ id, label, icon: Icon, count }: { id: string; label: string; icon: any; count?: number }) => (
     <button
-      onClick={() => setActiveTab(id as any)}
+      onClick={() => {
+        setActiveTab(id as any);
+        setSearchParams({ tab: id }, { replace: false });
+      }}
       className={`flex items-center gap-2 px-4 py-3 rounded-xl transition-all font-semibold ${
         activeTab === id
           ? 'bg-blue-600 text-white shadow-md'

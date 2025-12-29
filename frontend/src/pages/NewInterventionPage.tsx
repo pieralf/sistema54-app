@@ -406,8 +406,46 @@ export default function NewInterventionPage() {
     // Se contratto è attivo, disabilita chiamata
     if (isContratto) {
       setValue("flag_diritto_chiamata", false);
+      setValue("is_chiamata", false);
     }
   }, [isContratto, setValue]);
+
+  // Sincronizza is_chiamata con flag_diritto_chiamata
+  const flagDirittoChiamata = watch("flag_diritto_chiamata");
+  useEffect(() => {
+    // Quando flag_diritto_chiamata cambia, aggiorna anche is_chiamata
+    setValue("is_chiamata", flagDirittoChiamata);
+  }, [flagDirittoChiamata, setValue]);
+
+  // Aggiorna contratto/chiamata quando cambia la macro categoria
+  useEffect(() => {
+    const clienteId = watch("cliente_id");
+    const macroCategoria = watch("macro_categoria");
+    
+    if (clienteId && clienteMultisede) {
+      // Ricalcola se il cliente ha contratto per la nuova macro categoria
+      let hasContrattoPerCategoria = false;
+      
+      if (macroCategoria === "Informatica & IT") {
+        hasContrattoPerCategoria = clienteMultisede.has_contratto_assistenza || false;
+      } else if (macroCategoria === "Printing & Office") {
+        // Controlla se ci sono assets printing a noleggio
+        hasContrattoPerCategoria = assetsNoleggioCliente.length > 0;
+      }
+      
+      if (hasContrattoPerCategoria) {
+        setValue("is_contratto", true);
+        setValue("flag_diritto_chiamata", false);
+        setValue("is_chiamata", false);
+        setContractLocked(true);
+      } else {
+        setValue("is_contratto", false);
+        setValue("flag_diritto_chiamata", true);
+        setValue("is_chiamata", true);
+        setContractLocked(false);
+      }
+    }
+  }, [watch("macro_categoria"), watch("cliente_id"), clienteMultisede, assetsNoleggioCliente.length, setValue]);
   
   // Aggiorna le macchine Printing quando cambia la sede selezionata
   useEffect(() => {
@@ -510,22 +548,13 @@ export default function NewInterventionPage() {
         setClienteMultisede(null);
       }
       
-      // Gestione contratto/chiamata in base al cliente
-      if (c.has_contratto_assistenza) {
-        // Cliente CON contratto: contratto attivo, chiamata disabilitata
-        setValue("is_contratto", true);
-        setValue("flag_diritto_chiamata", false);
-      } else {
-        // Cliente SENZA contratto: chiamata attiva di default
-        setValue("is_contratto", false);
-        setValue("flag_diritto_chiamata", true);
-      }
-      
       // Carica assets a noleggio se il cliente ha contratto noleggio
+      let clienteCompleto: any = null;
       if (c.has_noleggio) {
         try {
           const clienteRes = await axios.get(`${getApiUrl()}/clienti/${c.id}`);
-          if (clienteRes.data?.assets_noleggio) {
+          clienteCompleto = clienteRes.data;
+          if (clienteCompleto?.assets_noleggio) {
             // Filtra per tipo Printing e per sede se selezionata
             const sedeIdSelezionata = watch("sede_id");
             let assetsPrinting = clienteRes.data.assets_noleggio.filter((a: any) => a.tipo_asset === "Printing");
@@ -578,6 +607,41 @@ export default function NewInterventionPage() {
         }
       } else {
         setAssetsNoleggioCliente([]);
+      }
+      
+      // Gestione contratto/chiamata in base al cliente e macro categoria
+      const macroCategoriaCorrente = watch("macro_categoria");
+      
+      // Determina se il cliente ha contratto per la macro categoria corrente
+      let hasContrattoPerCategoria = false;
+      
+      if (macroCategoriaCorrente === "Informatica & IT") {
+        // Per Informatica: controlla contratto assistenza
+        hasContrattoPerCategoria = c.has_contratto_assistenza || false;
+      } else if (macroCategoriaCorrente === "Printing & Office") {
+        // Per Printing: controlla se ha prodotti a noleggio (printing)
+        if (clienteCompleto) {
+          const hasPrintingNoleggio = clienteCompleto.has_noleggio && 
+            clienteCompleto.assets_noleggio?.some((a: any) => a.tipo_asset === "Printing");
+          hasContrattoPerCategoria = hasPrintingNoleggio || false;
+        } else {
+          // Se non abbiamo caricato i dati completi, usa i dati base
+          hasContrattoPerCategoria = c.has_noleggio || false;
+        }
+      }
+      
+      if (hasContrattoPerCategoria) {
+        // Cliente CON contratto per questa categoria: contratto attivo, chiamata disabilitata
+        setValue("is_contratto", true);
+        setValue("flag_diritto_chiamata", false);
+        setValue("is_chiamata", false);
+        setContractLocked(true);
+      } else {
+        // Cliente SENZA contratto per questa categoria: chiamata attiva di default
+        setValue("is_contratto", false);
+        setValue("flag_diritto_chiamata", true);
+        setValue("is_chiamata", true);
+        setContractLocked(false);
       }
   };
 
@@ -1335,44 +1399,48 @@ export default function NewInterventionPage() {
                     <button type="button" onClick={() => appendRicambio({ descrizione: "", quantita: 1, prezzo_unitario: 0 })} className="text-[10px] font-bold bg-blue-50 text-blue-700 px-3 py-2 rounded-full flex items-center border border-blue-200"><Plus className="w-3 h-3 mr-1" /> MANUALE</button>
                 </div>
             </div>
+            
+            {/* Intestazione descrittiva dei campi */}
+            {ricambiFields.length > 0 && (
+              <div className="grid grid-cols-12 gap-2 mb-2 px-1 text-xs font-semibold text-gray-600">
+                <div className="col-span-6">Descrizione prodotto</div>
+                <div className="col-span-2 text-center">Quantità</div>
+                <div className="col-span-3 text-right">Prezzo unitario (€)</div>
+                <div className="col-span-1"></div>
+              </div>
+            )}
+            
             <div className="space-y-3">
                 {ricambiFields.map((field, index) => {
-                  // Verifica se ci sono asset a noleggio nei dettagli
-                  const dettagli = watch("dettagli") || [];
-                  const hasNoleggioAsset = dettagli.some((det: any) => {
-                    const partNumber = det.part_number || '';
-                    return partNumber.startsWith('NOLEGGIO_');
-                  });
-                  
                   const prezzoAttuale = watch(`ricambi.${index}.prezzo_unitario`) || 0;
                   
                   return (
                     <div key={field.id} className="flex gap-2 items-start">
-                        <input {...register(`ricambi.${index}.descrizione`)} className="bg-white border p-2 rounded-lg w-full text-sm" placeholder="Descrizione" />
-                        <input type="number" {...register(`ricambi.${index}.quantita`, {valueAsNumber: true})} className="bg-white border p-2 rounded-lg w-16 text-center text-sm" placeholder="Qt" />
+                        <input 
+                          {...register(`ricambi.${index}.descrizione`)} 
+                          className="bg-white border p-2 rounded-lg w-full text-sm" 
+                          placeholder="Inserisci descrizione prodotto" 
+                        />
+                        <input 
+                          type="number" 
+                          {...register(`ricambi.${index}.quantita`, {valueAsNumber: true})} 
+                          className="bg-white border p-2 rounded-lg w-16 text-center text-sm" 
+                          placeholder="Qt" 
+                          min="1"
+                        />
                         <div className="relative">
                           <input 
                             type="number" 
                             step="0.01" 
+                            min="0"
                             {...register(`ricambi.${index}.prezzo_unitario`, {
-                              valueAsNumber: true,
-                              onChange: (e) => {
-                                // Se c'è un asset a noleggio, forza il prezzo a 0
-                                if (hasNoleggioAsset) {
-                                  setValue(`ricambi.${index}.prezzo_unitario`, 0);
-                                }
-                              }
+                              valueAsNumber: true
                             })} 
-                            className={`bg-white border p-2 rounded-lg w-24 text-right text-sm ${hasNoleggioAsset ? 'bg-green-50 border-green-300' : ''}`} 
-                            placeholder="€" 
-                            disabled={hasNoleggioAsset}
-                            value={hasNoleggioAsset ? 0 : prezzoAttuale}
+                            className="bg-white border p-2 rounded-lg w-24 text-right text-sm" 
+                            placeholder="0.00" 
                           />
-                          {hasNoleggioAsset && (
-                            <span className="absolute -top-5 right-0 text-[10px] text-green-600 font-semibold">NOLEGGIO</span>
-                          )}
                         </div>
-                        <button type="button" onClick={() => removeRicambio(index)} className="text-red-400 p-2"><Trash2 className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => removeRicambio(index)} className="text-red-400 p-2 hover:text-red-600 transition-colors" title="Rimuovi prodotto"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   );
                 })}
