@@ -138,3 +138,4 @@ docker exec NOME_CONTAINER pg_dump ...
 - Assicurati che il database sia vuoto o che tu voglia sovrascriverlo
 
 
+

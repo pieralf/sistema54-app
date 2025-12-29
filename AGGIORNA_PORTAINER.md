@@ -184,3 +184,4 @@ docker-compose -f docker-compose.portainer.yml logs -f backend
 - Il frontend potrebbe richiedere un hard refresh (Ctrl+F5) per vedere le modifiche
 
 
+

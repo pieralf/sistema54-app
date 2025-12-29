@@ -131,7 +131,6 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       storage: createJSONStorage(() => sessionStorage),
-<<<<<<< HEAD
       partialize: (state) => ({ token: state.token, user: state.user }),
       onRehydrateStorage: () => (state) => {
         // Quando lo stato viene ripristinato, imposta isAuthenticated basandosi sul token
@@ -141,22 +140,13 @@ export const useAuthStore = create<AuthState>()(
           axios.defaults.headers.common['Authorization'] = `Bearer ${state.token}`;
         }
       }
-=======
-      partialize: (state) => ({ token: state.token, user: state.user })
->>>>>>> 8a24854fd306e7698855d8f23c56e21682953e6d
     }
   )
 );
 
-<<<<<<< HEAD
 // Migrazione da localStorage a sessionStorage (se necessario)
 const oldLocalStorageToken = localStorage.getItem('auth-storage');
 if (oldLocalStorageToken) {
-=======
-// Inizializza header se c'è un token salvato
-const storedToken = sessionStorage.getItem('auth-storage');
-if (storedToken) {
->>>>>>> 8a24854fd306e7698855d8f23c56e21682953e6d
   try {
     // Copia i dati da localStorage a sessionStorage
     sessionStorage.setItem('auth-storage', oldLocalStorageToken);
@@ -166,4 +156,3 @@ if (storedToken) {
     // Ignora errori di migrazione
   }
 }
-
