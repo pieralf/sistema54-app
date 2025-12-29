@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, Users, Building2, FileText, Search, Plus, Edit, Trash2, Shield, Package, Home } from 'lucide-react';
+import { ChevronLeft, Users, Building2, FileText, Search, Plus, Edit, Trash2, Shield, Package, Home, LogOut } from 'lucide-react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
@@ -8,7 +8,7 @@ import { getApiUrl } from '../config/api';
 import EditUserModal from '../components/EditUserModal';
 
 export default function AdminPage() {
-  const { user, token } = useAuthStore();
+  const { user, token, logout } = useAuthStore();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as any) || 'users';
@@ -256,6 +256,18 @@ export default function AdminPage() {
               <h1 className="text-xl font-bold text-slate-800">Pannello Admin</h1>
             </div>
           </div>
+          <button
+            onClick={() => {
+              if (window.confirm('Sei sicuro di voler uscire?')) {
+                logout();
+                navigate('/login');
+              }
+            }}
+            className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-all"
+            title="Logout"
+          >
+            <LogOut className="w-6 h-6" />
+          </button>
         </div>
       </header>
 

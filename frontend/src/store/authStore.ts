@@ -111,30 +111,49 @@ export const useAuthStore = create<AuthState>()(
             user: response.data,
             isAuthenticated: true
           });
-        } catch (error) {
-          // Token non valido, logout
-          get().logout();
+        } catch (error: any) {
+          // Solo se è un errore 401/403 (non autorizzato), fai logout
+          // Se è un errore di rete, mantieni la sessione (potrebbe essere temporaneo)
+          if (error.response?.status === 401 || error.response?.status === 403) {
+            // Token non valido, logout
+            get().logout();
+          } else if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+            // Errore di rete: mantieni la sessione ma non aggiornare isAuthenticated
+            // L'utente rimane loggato finché il token non scade realmente
+            console.warn('Errore di rete durante checkAuth, mantengo la sessione');
+          } else {
+            // Altri errori: mantieni la sessione
+            console.warn('Errore durante checkAuth, mantengo la sessione:', error);
+          }
         }
       }
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ token: state.token, user: state.user })
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({ token: state.token, user: state.user }),
+      onRehydrateStorage: () => (state) => {
+        // Quando lo stato viene ripristinato, imposta isAuthenticated basandosi sul token
+        if (state?.token) {
+          state.isAuthenticated = true;
+          // Imposta anche l'header axios
+          axios.defaults.headers.common['Authorization'] = `Bearer ${state.token}`;
+        }
+      }
     }
   )
 );
 
-// Inizializza header se c'è un token salvato
-const storedToken = localStorage.getItem('auth-storage');
-if (storedToken) {
+// Migrazione da localStorage a sessionStorage (se necessario)
+const oldLocalStorageToken = localStorage.getItem('auth-storage');
+if (oldLocalStorageToken) {
   try {
-    const parsed = JSON.parse(storedToken);
-    if (parsed.state?.token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${parsed.state.token}`;
-    }
+    // Copia i dati da localStorage a sessionStorage
+    sessionStorage.setItem('auth-storage', oldLocalStorageToken);
+    // Rimuovi il vecchio localStorage
+    localStorage.removeItem('auth-storage');
   } catch (e) {
-    // Ignora errori di parsing
+    // Ignora errori di migrazione
   }
 }
 

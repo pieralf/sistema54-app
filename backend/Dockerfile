@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # Installazione dipendenze di sistema (CRUCIALE PER PDF/WEASYPRINT)
-# Installiamo: build-essential (compilatori), librerie grafiche per il rendering PDF (cairo, pango, gdk)
+# Installiamo: build-essential (compilatori), librerie grafiche per il rendering PDF (cairo, pango, gdk), curl per healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gdk-pixbuf2.0-0 \
     libffi-dev \
     shared-mime-info \
+    curl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copia e installa i requirements PRIMA del codice (sfrutta la cache di Docker)

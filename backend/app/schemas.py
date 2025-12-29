@@ -212,8 +212,10 @@ class InterventoResponse(InterventoBase):
 
 # --- SCHEMAS MAGAZZINO ---
 class ProdottoBase(BaseModel):
+    codice_articolo: str
     descrizione: str
     prezzo_vendita: float
+    costo_acquisto: Optional[float] = 0.0
     giacenza: int
     categoria: Optional[str] = None
 
@@ -221,8 +223,10 @@ class ProdottoCreate(ProdottoBase):
     pass
 
 class ProdottoUpdate(BaseModel):
+    codice_articolo: Optional[str] = None
     descrizione: Optional[str] = None
     prezzo_vendita: Optional[float] = None
+    costo_acquisto: Optional[float] = None
     giacenza: Optional[int] = None
     categoria: Optional[str] = None
 

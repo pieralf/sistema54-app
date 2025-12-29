@@ -63,6 +63,25 @@ services:
       - sistema54-network
     command: npm run dev -- --host 0.0.0.0
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: sistema54_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@sistema54.com
+      PGADMIN_DEFAULT_PASSWORD: sistema54admin
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - ./data/pgadmin:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - sistema54-network
+
 networks:
   sistema54-network:
     driver: bridge

@@ -468,26 +468,6 @@ print("Scheduler notifiche scadenze avviato:")
 print("  - Contratti (noleggio e assistenza): ogni lunedì alle 9:00")
 print("  - Letture copie: ogni giorno alle 9:00")
 
-app = FastAPI(title="SISTEMA54 Digital API - CMMS")
-
-# Configurazione CORS (Fondamentale per far parlare Frontend e Backend)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # In produzione restringere al dominio specifico
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Directory per upload file
-UPLOAD_DIR = Path("uploads")
-UPLOAD_DIR.mkdir(exist_ok=True)
-LOGO_DIR = UPLOAD_DIR / "logos"
-LOGO_DIR.mkdir(exist_ok=True)
-
-# Monta directory static per servire file uploadati
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
-
 # --- FUNZIONE MOCK EMAIL ---
 def send_email_background(email_to: str, pdf_content: bytes, numero_rit: str, azienda_nome: str):
     print(f"--- [EMAIL MOCK] ---")
@@ -1296,6 +1276,16 @@ def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
     
     update_data = prodotto.model_dump(exclude_unset=True)
+    
+    # Verifica che codice_articolo non sia duplicato (se viene aggiornato)
+    if 'codice_articolo' in update_data and update_data['codice_articolo']:
+        existing = db.query(models.ProdottoMagazzino).filter(
+            models.ProdottoMagazzino.codice_articolo == update_data['codice_articolo'],
+            models.ProdottoMagazzino.id != prodotto_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Codice articolo già esistente per un altro prodotto")
+    
     for key, value in update_data.items():
         setattr(db_prodotto, key, value)
     

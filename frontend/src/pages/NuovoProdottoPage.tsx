@@ -54,6 +54,7 @@ export default function NuovoProdottoPage() {
     try {
       if (isEdit) {
         await axios.put(`${getApiUrl()}/magazzino/${id}`, {
+          codice_articolo: data.codice_articolo,
           descrizione: data.descrizione,
           prezzo_vendita: parseFloat(data.prezzo_vendita) || 0,
           costo_acquisto: parseFloat(data.costo_acquisto) || 0,
@@ -123,8 +124,7 @@ export default function NuovoProdottoPage() {
             <IOSInput
               label="Codice Articolo *"
               {...register('codice_articolo', { 
-                required: isEdit ? false : 'Campo obbligatorio',
-                disabled: isEdit
+                required: 'Campo obbligatorio'
               })}
             />
             {errors.codice_articolo && (

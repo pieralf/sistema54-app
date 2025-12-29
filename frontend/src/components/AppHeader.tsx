@@ -1,6 +1,7 @@
-import { Home, ChevronLeft } from 'lucide-react';
+import { Home, ChevronLeft, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSettingsStore } from '../store/settingsStore';
+import { useAuthStore } from '../store/authStore';
 import { getApiUrl } from '../config/api';
 
 interface AppHeaderProps {
@@ -13,8 +14,16 @@ interface AppHeaderProps {
 export default function AppHeader({ title, showBack = true, showHome = true, rightContent }: AppHeaderProps) {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
+  const { logout, isAuthenticated } = useAuthStore();
   const logoUrl = settings?.logo_url || '';
   const nomeAzienda = settings?.nome_azienda || 'SISTEMA54';
+
+  const handleLogout = () => {
+    if (window.confirm('Sei sicuro di voler uscire?')) {
+      logout();
+      navigate('/login');
+    }
+  };
 
   return (
     <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
@@ -31,7 +40,13 @@ export default function AppHeader({ title, showBack = true, showHome = true, rig
           )}
           {showBack && (
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => {
+                if (window.history.length > 1) {
+                  window.history.back();
+                } else {
+                  navigate('/');
+                }
+              }}
               className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-all"
               title="Torna indietro"
             >
@@ -54,11 +69,18 @@ export default function AppHeader({ title, showBack = true, showHome = true, rig
             </div>
           </div>
         </div>
-        {rightContent && (
-          <div className="flex items-center gap-2">
-            {rightContent}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {rightContent}
+          {isAuthenticated && (
+            <button
+              onClick={handleLogout}
+              className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-all"
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5 sm:w-6 sm:h-6" />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );
