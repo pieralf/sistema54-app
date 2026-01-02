@@ -139,3 +139,5 @@ docker exec NOME_CONTAINER pg_dump ...
 
 
 
+
+

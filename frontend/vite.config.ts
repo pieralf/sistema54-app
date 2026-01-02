@@ -7,6 +7,13 @@ export default defineConfig({
     host: true,
     strictPort: true,
     port: 5173,
+    allowedHosts: [
+      'rit.lan',
+      'localhost',
+      '127.0.0.1',
+      '.lan', // Permette tutti i domini .lan
+      '192.168.1.119' // IP del server Portainer
+    ],
     watch: {
       usePolling: true
     },

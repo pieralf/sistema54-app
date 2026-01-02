@@ -29,6 +29,19 @@ export function getApiUrl(): string {
     return url;
   }
   
+  // Controlla se si sta accedendo tramite proxy DNS (hostname diverso da IP diretto)
+  // Se l'hostname non è un IP diretto (contiene lettere o è un dominio), potrebbe essere un proxy
+  const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+  const isProxyAccess = !isIpAddress && hostname !== 'localhost' && hostname !== '127.0.0.1';
+  
+  if (isProxyAccess) {
+    // Se si accede tramite proxy DNS, usa percorso relativo che il proxy può inoltrare
+    // Assumendo che il proxy sia configurato per inoltrare /api/* al backend
+    const url = '/api';
+    console.log('[getApiUrl] Accesso tramite proxy DNS rilevato, usando percorso relativo:', url);
+    return url;
+  }
+  
   // Altrimenti usa l'IP/hostname corrente con protocollo HTTP
   // (il backend è sempre su HTTP, anche se il frontend potrebbe essere su HTTPS)
   const url = `http://${hostname}:${port}`;
