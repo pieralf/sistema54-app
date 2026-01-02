@@ -1,21 +1,33 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, status, UploadFile, File, Query
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, status, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_, and_
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta, time as dt_time
 from fastapi.responses import Response, FileResponse
 from . import models, schemas, database, auth
 from .services import pdf_service, email_service, two_factor_service
 from .utils import get_default_permessi
+from .audit_logger import log_action, get_changes_dict
 import os
 import shutil
 from pathlib import Path
 import asyncio
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+# Helper per ottenere IP dalla richiesta
+def get_client_ip(request: Request) -> str:
+    """Ottiene l'IP del client dalla richiesta"""
+    # Prova prima X-Forwarded-For (se dietro proxy)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # Prende il primo IP nella lista (il client originale)
+        return forwarded_for.split(",")[0].strip()
+    # Altrimenti usa X-Real-IP o client.host
+    return request.headers.get("X-Real-IP") or request.client.host if request.client else "unknown"
 
 # Helper per convertire campi time in stringhe
 def convert_intervento_time_fields(intervento: models.Intervento) -> dict:
@@ -808,7 +820,7 @@ def list_users(skip: int = 0, limit: int = 100, db: Session = Depends(database.g
     return db.query(models.Utente).offset(skip).limit(limit).all()
 
 @app.put("/api/users/{user_id}", response_model=schemas.UserResponse, tags=["Utenti"])
-def update_user(user_id: int, user_update: schemas.UserUpdate, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.require_admin)):
+def update_user(user_id: int, user_update: schemas.UserUpdate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.require_admin)):
     """Aggiorna un utente (solo admin)"""
     db_user = db.query(models.Utente).filter(models.Utente.id == user_id).first()
     if not db_user:
@@ -817,6 +829,15 @@ def update_user(user_id: int, user_update: schemas.UserUpdate, db: Session = Dep
     # SuperAdmin può modificare tutto, Admin solo utenti non-superadmin
     if current_user.ruolo != models.RuoloUtente.SUPERADMIN and db_user.ruolo == models.RuoloUtente.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Non puoi modificare un SuperAdmin")
+    
+    # Salva stato originale per audit log
+    user_originale = models.Utente(
+        email=db_user.email,
+        nome_completo=db_user.nome_completo,
+        ruolo=db_user.ruolo,
+        is_active=db_user.is_active,
+        permessi=db_user.permessi.copy() if db_user.permessi else {}
+    )
     
     update_data = user_update.model_dump(exclude_unset=True)
     if "password" in update_data:
@@ -850,6 +871,29 @@ def update_user(user_id: int, user_update: schemas.UserUpdate, db: Session = Dep
     
     db.commit()
     db.refresh(db_user)
+    
+    # Log audit con modifiche
+    fields_to_track = ['email', 'nome_completo', 'ruolo', 'is_active']
+    changes = get_changes_dict(user_originale, db_user, fields_to_track)
+    
+    # Traccia anche modifiche ai permessi se presenti
+    if 'permessi' in update_data and user_originale.permessi != db_user.permessi:
+        if 'permessi' not in changes:
+            changes['permessi'] = {}
+        changes['permessi']['old'] = user_originale.permessi
+        changes['permessi']['new'] = db_user.permessi
+    
+    log_action(
+        db=db,
+        user=current_user,
+        action="UPDATE",
+        entity_type="utente",
+        entity_id=db_user.id,
+        entity_name=db_user.nome_completo or db_user.email,
+        changes=changes if changes else None,
+        ip_address=get_client_ip(request)
+    )
+    
     return db_user
 
 # --- API GEOCODING (Proxy per Nominatim) ---
@@ -933,7 +977,7 @@ def upload_logo(
 # --- API CLIENTI (CORRETTA) ---
 
 @app.post("/clienti/", response_model=schemas.ClienteResponse, tags=["Clienti"])
-def create_cliente(cliente: schemas.ClienteCreate, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
+def create_cliente(cliente: schemas.ClienteCreate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
     # 1. Controllo Duplicati (Solo se PIVA o CF sono forniti E non vuoti)
     p_iva_valida = cliente.p_iva and cliente.p_iva.strip()
     cf_valido = cliente.codice_fiscale and cliente.codice_fiscale.strip()
@@ -1016,6 +1060,18 @@ def create_cliente(cliente: schemas.ClienteCreate, db: Session = Depends(databas
         
         db.commit() # Commit unico atomico
         db.refresh(db_cliente)
+        
+        # Log audit
+        log_action(
+            db=db,
+            user=current_user,
+            action="CREATE",
+            entity_type="cliente",
+            entity_id=db_cliente.id,
+            entity_name=db_cliente.ragione_sociale,
+            ip_address=get_client_ip(request)
+        )
+        
         return db_cliente
 
     except Exception as e:
@@ -1059,13 +1115,27 @@ def get_sedi_cliente(cliente_id: int, db: Session = Depends(database.get_db), cu
     return db_cliente.sedi
 
 @app.put("/clienti/{cliente_id}", response_model=schemas.ClienteResponse, tags=["Clienti"])
-def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
+def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
     """Aggiorna un cliente e le sue sedi"""
     db_cliente = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
     if not db_cliente:
         raise HTTPException(status_code=404, detail="Cliente non trovato")
     
     try:
+        # Salva stato originale per audit log
+        cliente_originale = models.Cliente(
+            ragione_sociale=db_cliente.ragione_sociale,
+            indirizzo=db_cliente.indirizzo,
+            citta=db_cliente.citta,
+            cap=db_cliente.cap,
+            p_iva=db_cliente.p_iva,
+            codice_fiscale=db_cliente.codice_fiscale,
+            email_amministrazione=db_cliente.email_amministrazione,
+            has_contratto_assistenza=db_cliente.has_contratto_assistenza,
+            has_noleggio=db_cliente.has_noleggio,
+            has_multisede=db_cliente.has_multisede
+        )
+        
         # Aggiorna dati cliente (escludendo sedi e assets)
         update_data = cliente.model_dump(exclude_unset=True, exclude={"assets_noleggio", "sedi"})
         # Assicurati che is_pa e codice_sdi siano sempre inclusi (anche se False o vuoto)
@@ -1236,6 +1306,23 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, db: Session 
         
         db.commit()
         db.refresh(db_cliente)
+        
+        # Log audit con modifiche
+        fields_to_track = ['ragione_sociale', 'indirizzo', 'citta', 'cap', 'p_iva', 'codice_fiscale', 
+                          'email_amministrazione', 'has_contratto_assistenza', 'has_noleggio', 'has_multisede']
+        changes = get_changes_dict(cliente_originale, db_cliente, fields_to_track)
+        
+        log_action(
+            db=db,
+            user=current_user,
+            action="UPDATE",
+            entity_type="cliente",
+            entity_id=db_cliente.id,
+            entity_name=db_cliente.ragione_sociale,
+            changes=changes if changes else None,
+            ip_address=get_client_ip(request)
+        )
+        
         return db_cliente
     except Exception as e:
         db.rollback()
@@ -1245,7 +1332,7 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, db: Session 
 # --- API MAGAZZINO ---
 
 @app.post("/magazzino/", response_model=schemas.ProdottoResponse, tags=["Magazzino"])
-def create_prodotto(prodotto: schemas.ProdottoCreate, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
+def create_prodotto(prodotto: schemas.ProdottoCreate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
     existing = db.query(models.ProdottoMagazzino).filter(models.ProdottoMagazzino.codice_articolo == prodotto.codice_articolo).first()
     if existing:
         raise HTTPException(status_code=400, detail="Codice articolo già esistente.")
@@ -1254,6 +1341,18 @@ def create_prodotto(prodotto: schemas.ProdottoCreate, db: Session = Depends(data
     db.add(db_prodotto)
     db.commit()
     db.refresh(db_prodotto)
+    
+    # Log audit
+    log_action(
+        db=db,
+        user=current_user,
+        action="CREATE",
+        entity_type="magazzino",
+        entity_id=db_prodotto.id,
+        entity_name=db_prodotto.codice_articolo or db_prodotto.descrizione,
+        ip_address=get_client_ip(request)
+    )
+    
     return db_prodotto
 
 @app.get("/magazzino/", response_model=List[schemas.ProdottoResponse], tags=["Magazzino"])
@@ -1270,10 +1369,20 @@ def read_magazzino(q: str = "", skip: int = 0, limit: int = 100, db: Session = D
     return query.order_by(models.ProdottoMagazzino.descrizione.asc()).offset(skip).limit(limit).all()
 
 @app.put("/magazzino/{prodotto_id}", response_model=schemas.ProdottoResponse, tags=["Magazzino"])
-def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
+def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
     db_prodotto = db.query(models.ProdottoMagazzino).filter(models.ProdottoMagazzino.id == prodotto_id).first()
     if not db_prodotto:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
+    
+    # Salva stato originale per audit log
+    prodotto_originale = models.ProdottoMagazzino(
+        codice_articolo=db_prodotto.codice_articolo,
+        descrizione=db_prodotto.descrizione,
+        prezzo_vendita=db_prodotto.prezzo_vendita,
+        costo_acquisto=db_prodotto.costo_acquisto,
+        giacenza=db_prodotto.giacenza,
+        categoria=db_prodotto.categoria
+    )
     
     update_data = prodotto.model_dump(exclude_unset=True)
     
@@ -1291,6 +1400,22 @@ def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, db: Sess
     
     db.commit()
     db.refresh(db_prodotto)
+    
+    # Log audit con modifiche
+    fields_to_track = ['codice_articolo', 'descrizione', 'prezzo_vendita', 'costo_acquisto', 'giacenza', 'categoria']
+    changes = get_changes_dict(prodotto_originale, db_prodotto, fields_to_track)
+    
+    log_action(
+        db=db,
+        user=current_user,
+        action="UPDATE",
+        entity_type="magazzino",
+        entity_id=db_prodotto.id,
+        entity_name=db_prodotto.codice_articolo or db_prodotto.descrizione,
+        changes=changes if changes else None,
+        ip_address=get_client_ip(request)
+    )
+    
     return db_prodotto
 
 # --- API RIT ---
@@ -1299,6 +1424,7 @@ def update_prodotto(prodotto_id: int, prodotto: schemas.ProdottoUpdate, db: Sess
 def create_intervento(
     intervento: schemas.InterventoCreate, 
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(database.get_db),
     current_user: models.Utente = Depends(auth.get_current_active_user)
 ):
@@ -1502,6 +1628,17 @@ def create_intervento(
         
         db.commit()
         db.refresh(db_intervento)
+        
+        # Log audit
+        log_action(
+            db=db,
+            user=current_user,
+            action="CREATE",
+            entity_type="intervento",
+            entity_id=db_intervento.id,
+            entity_name=db_intervento.numero_relazione,
+            ip_address=get_client_ip(request)
+        )
 
         # 6. Invio Email (Gestito fuori dalla transazione DB)
         try:
@@ -1616,6 +1753,7 @@ def read_intervento(intervento_id: int, db: Session = Depends(database.get_db), 
 def update_intervento(
     intervento_id: int,
     intervento_update: schemas.InterventoCreate,
+    request: Request,
     db: Session = Depends(database.get_db),
     current_user: models.Utente = Depends(auth.get_current_active_user)
 ):
@@ -1623,6 +1761,17 @@ def update_intervento(
     db_intervento = db.query(models.Intervento).filter(models.Intervento.id == intervento_id).first()
     if not db_intervento:
         raise HTTPException(status_code=404, detail="Intervento non trovato")
+    
+    # Salva stato originale per audit log (prima delle modifiche)
+    intervento_originale = models.Intervento(
+        numero_relazione=db_intervento.numero_relazione,
+        cliente_id=db_intervento.cliente_id,
+        macro_categoria=db_intervento.macro_categoria,
+        is_contratto=db_intervento.is_contratto,
+        is_chiamata=db_intervento.is_chiamata,
+        costo_chiamata_applicato=db_intervento.costo_chiamata_applicato,
+        tariffa_oraria_applicata=db_intervento.tariffa_oraria_applicata
+    )
     
     # Verifica cliente se cambiato
     if intervento_update.cliente_id != db_intervento.cliente_id:
@@ -1764,6 +1913,23 @@ def update_intervento(
     
     db.commit()
     db.refresh(db_intervento)
+    
+    # Log audit (traccia modifiche principali)
+    # Nota: per interventi complessi, tracciamo solo i campi principali
+    fields_to_track = ['numero_relazione', 'cliente_id', 'macro_categoria', 'is_contratto', 'is_chiamata', 
+                       'costo_chiamata_applicato', 'tariffa_oraria_applicata']
+    changes = get_changes_dict(intervento_originale, db_intervento, fields_to_track)
+    
+    log_action(
+        db=db,
+        user=current_user,
+        action="UPDATE",
+        entity_type="intervento",
+        entity_id=db_intervento.id,
+        entity_name=db_intervento.numero_relazione,
+        changes=changes if changes else None,
+        ip_address=get_client_ip(request)
+    )
     
     # Converti per la risposta
     intervento_dict = convert_intervento_time_fields(db_intervento)
@@ -2022,3 +2188,90 @@ def create_lettura_copie(
     db.commit()
     db.refresh(db_lettura)
     return db_lettura
+
+# --- API AUDIT LOG ---
+@app.get("/api/audit-logs/", response_model=List[schemas.AuditLogResponse], tags=["Audit Log"])
+def get_audit_logs(
+    skip: int = 0,
+    limit: int = 100,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    action: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(database.get_db),
+    current_user: models.Utente = Depends(auth.require_admin)
+):
+    """
+    Recupera i log di audit con filtri opzionali.
+    Solo Admin e SuperAdmin possono accedere ai log.
+    """
+    query = db.query(models.AuditLog)
+    
+    # Filtri opzionali
+    if entity_type:
+        query = query.filter(models.AuditLog.entity_type == entity_type)
+    if entity_id:
+        query = query.filter(models.AuditLog.entity_id == entity_id)
+    if user_id:
+        query = query.filter(models.AuditLog.user_id == user_id)
+    if action:
+        query = query.filter(models.AuditLog.action == action.upper())
+    if start_date:
+        query = query.filter(models.AuditLog.timestamp >= start_date)
+    if end_date:
+        query = query.filter(models.AuditLog.timestamp <= end_date)
+    
+    # Ordina per timestamp decrescente (più recenti prima)
+    logs = query.order_by(desc(models.AuditLog.timestamp)).offset(skip).limit(limit).all()
+    return logs
+
+@app.get("/api/audit-logs/stats", tags=["Audit Log"])
+def get_audit_logs_stats(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(database.get_db),
+    current_user: models.Utente = Depends(auth.require_admin)
+):
+    """
+    Ottiene statistiche sui log di audit.
+    Solo Admin e SuperAdmin possono accedere.
+    """
+    query = db.query(models.AuditLog)
+    
+    if start_date:
+        query = query.filter(models.AuditLog.timestamp >= start_date)
+    if end_date:
+        query = query.filter(models.AuditLog.timestamp <= end_date)
+    
+    total_logs = query.count()
+    
+    # Statistiche per tipo di entità
+    entity_stats = {}
+    for entity_type in ['cliente', 'intervento', 'magazzino', 'utente']:
+        count = query.filter(models.AuditLog.entity_type == entity_type).count()
+        entity_stats[entity_type] = count
+    
+    # Statistiche per azione
+    action_stats = {}
+    for action in ['CREATE', 'UPDATE', 'DELETE']:
+        count = query.filter(models.AuditLog.action == action).count()
+        action_stats[action] = count
+    
+    # Top 5 utenti più attivi
+    from sqlalchemy import func
+    top_users = db.query(
+        models.AuditLog.user_id,
+        models.AuditLog.user_nome,
+        func.count(models.AuditLog.id).label('count')
+    ).group_by(models.AuditLog.user_id, models.AuditLog.user_nome).order_by(desc('count')).limit(5).all()
+    
+    top_users_list = [{"user_id": u[0], "user_nome": u[1], "count": u[2]} for u in top_users]
+    
+    return {
+        "total_logs": total_logs,
+        "entity_stats": entity_stats,
+        "action_stats": action_stats,
+        "top_users": top_users_list
+    }

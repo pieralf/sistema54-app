@@ -287,3 +287,20 @@ class LetturaCopieResponse(LetturaCopieBase):
     created_at: datetime
     class Config:
         from_attributes = True
+
+# --- SCHEMAS AUDIT LOG ---
+class AuditLogResponse(BaseModel):
+    id: int
+    user_id: int
+    user_email: str
+    user_nome: str
+    action: str  # CREATE, UPDATE, DELETE
+    entity_type: str  # 'cliente', 'intervento', 'magazzino', 'utente'
+    entity_id: int
+    entity_name: Optional[str] = None
+    changes: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    timestamp: datetime
+    
+    class Config:
+        from_attributes = True

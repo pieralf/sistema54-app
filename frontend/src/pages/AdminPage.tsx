@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, Users, Building2, FileText, Search, Plus, Edit, Trash2, Shield, Package, Home, LogOut } from 'lucide-react';
+import { ChevronLeft, Users, Building2, FileText, Search, Plus, Edit, Trash2, Shield, Package, Home, LogOut, Activity } from 'lucide-react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
@@ -12,15 +12,25 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as any) || 'users';
-  const [activeTab, setActiveTab] = useState<'users' | 'clienti' | 'interventi' | 'magazzino'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'users' | 'clienti' | 'interventi' | 'magazzino' | 'logs'>(initialTab);
   const [users, setUsers] = useState<any[]>([]);
   const [clienti, setClienti] = useState<any[]>([]);
   const [interventi, setInterventi] = useState<any[]>([]);
   const [magazzino, setMagazzino] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [creatingUser, setCreatingUser] = useState(false);
+  
+  // Filtri per audit logs
+  const [logFilters, setLogFilters] = useState({
+    entity_type: '',
+    action: '',
+    user_id: '',
+    start_date: '',
+    end_date: ''
+  });
 
   // Aggiorna activeTab quando cambiano i query params (es. navigazione indietro)
   useEffect(() => {
@@ -41,6 +51,8 @@ export default function AdminPage() {
           return user?.permessi?.can_view_magazzino === true;
         case 'interventi':
           return user?.permessi?.can_view_interventi === true;
+        case 'logs':
+          return user?.ruolo === 'admin' || user?.ruolo === 'superadmin';
         default:
           return false;
       }
@@ -48,7 +60,7 @@ export default function AdminPage() {
     
     // Se la tab richiesta non è permessa, trova la prima tab permessa
     if (!isTabAllowed(tabFromParams)) {
-      const allowedTabs = ['users', 'clienti', 'magazzino', 'interventi'].filter(isTabAllowed);
+      const allowedTabs = ['users', 'clienti', 'magazzino', 'interventi', 'logs'].filter(isTabAllowed);
       if (allowedTabs.length > 0) {
         const firstAllowedTab = allowedTabs[0];
         setSearchParams({ tab: firstAllowedTab }, { replace: true });
@@ -96,6 +108,27 @@ export default function AdminPage() {
     }
   };
 
+  const loadAuditLogs = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (logFilters.entity_type) params.append('entity_type', logFilters.entity_type);
+      if (logFilters.action) params.append('action', logFilters.action);
+      if (logFilters.user_id) params.append('user_id', logFilters.user_id);
+      if (logFilters.start_date) params.append('start_date', logFilters.start_date);
+      if (logFilters.end_date) params.append('end_date', logFilters.end_date);
+      params.append('limit', '100');
+      
+      const res = await axios.get(`${getApiUrl()}/api/audit-logs/?${params.toString()}`);
+      setAuditLogs(res.data || []);
+    } catch (err: any) {
+      console.error('Errore caricamento audit logs:', err);
+      setAuditLogs([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -114,6 +147,8 @@ export default function AdminPage() {
       } else if (activeTab === 'magazzino') {
         const res = await axios.get(`${getApiUrl()}/magazzino/?q=${searchTerm}`);
         setMagazzino(res.data);
+      } else if (activeTab === 'logs') {
+        await loadAuditLogs();
       }
     } catch (err: any) {
       console.error('Errore caricamento dati:', err);
@@ -146,7 +181,11 @@ export default function AdminPage() {
   // Carica i dati quando cambia il tab (solo se c'è un token)
   useEffect(() => {
     if (token) {
-      loadData();
+      if (activeTab === 'logs') {
+        loadAuditLogs();
+      } else {
+        loadData();
+      }
     } else {
       console.warn('Token non presente, impossibile caricare i dati');
     }
@@ -332,6 +371,10 @@ export default function AdminPage() {
           {/* Tab Interventi - solo per admin/superadmin o operatori con permesso */}
           {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_view_interventi) && (
             <TabButton id="interventi" label="Interventi" icon={FileText} count={interventi.length} />
+          )}
+          {/* Tab Log - solo per admin/superadmin */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin') && (
+            <TabButton id="logs" label="Log" icon={Activity} />
           )}
         </div>
 
@@ -548,6 +591,146 @@ export default function AdminPage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </IOSCard>
+            )}
+
+            {activeTab === 'logs' && (
+              <IOSCard>
+                <div className="mb-6">
+                  <h2 className="text-lg font-bold text-gray-900 mb-4">Log delle Operazioni</h2>
+                  
+                  {/* Filtri */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 ml-1">
+                        Tipo Entità
+                      </label>
+                      <select
+                        value={logFilters.entity_type}
+                        onChange={(e) => setLogFilters({ ...logFilters, entity_type: e.target.value })}
+                        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      >
+                        <option value="">Tutti</option>
+                        <option value="cliente">Clienti</option>
+                        <option value="intervento">Interventi</option>
+                        <option value="magazzino">Magazzino</option>
+                        <option value="utente">Utenti</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 ml-1">
+                        Azione
+                      </label>
+                      <select
+                        value={logFilters.action}
+                        onChange={(e) => setLogFilters({ ...logFilters, action: e.target.value })}
+                        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      >
+                        <option value="">Tutte</option>
+                        <option value="CREATE">Creazione</option>
+                        <option value="UPDATE">Modifica</option>
+                        <option value="DELETE">Eliminazione</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 ml-1">
+                        Data Inizio
+                      </label>
+                      <input
+                        type="date"
+                        value={logFilters.start_date}
+                        onChange={(e) => setLogFilters({ ...logFilters, start_date: e.target.value })}
+                        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 ml-1">
+                        Data Fine
+                      </label>
+                      <input
+                        type="date"
+                        value={logFilters.end_date}
+                        onChange={(e) => setLogFilters({ ...logFilters, end_date: e.target.value })}
+                        className="w-full bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <button
+                        onClick={loadAuditLogs}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 text-sm font-semibold"
+                      >
+                        Applica Filtri
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {loading ? (
+                    <div className="text-center py-12 text-gray-500">Caricamento...</div>
+                  ) : auditLogs.length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">Nessun log trovato</div>
+                  ) : (
+                    auditLogs.map((log) => {
+                      const actionColors: { [key: string]: string } = {
+                        CREATE: 'bg-green-100 text-green-700',
+                        UPDATE: 'bg-blue-100 text-blue-700',
+                        DELETE: 'bg-red-100 text-red-700'
+                      };
+                      const entityLabels: { [key: string]: string } = {
+                        cliente: 'Cliente',
+                        intervento: 'Intervento',
+                        magazzino: 'Magazzino',
+                        utente: 'Utente'
+                      };
+                      
+                      return (
+                        <div
+                          key={log.id}
+                          className="p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`px-2 py-1 rounded text-xs font-bold ${actionColors[log.action] || 'bg-gray-100 text-gray-700'}`}>
+                                  {log.action}
+                                </span>
+                                <span className="px-2 py-1 rounded text-xs font-semibold bg-purple-100 text-purple-700">
+                                  {entityLabels[log.entity_type] || log.entity_type}
+                                </span>
+                                {log.entity_name && (
+                                  <span className="text-sm font-semibold text-gray-900">
+                                    {log.entity_name}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                <span className="font-semibold">{log.user_nome}</span> ({log.user_email})
+                              </div>
+                              {log.changes && Object.keys(log.changes).length > 0 && (
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <div className="font-semibold mb-1">Modifiche:</div>
+                                  {Object.entries(log.changes).map(([field, change]: [string, any]) => (
+                                    <div key={field} className="ml-2">
+                                      <span className="font-semibold">{field}:</span>{' '}
+                                      <span className="text-red-600">{String(change.old || 'N/A')}</span>
+                                      {' → '}
+                                      <span className="text-green-600">{String(change.new || 'N/A')}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="text-xs text-gray-400 mt-2">
+                                {new Date(log.timestamp).toLocaleString('it-IT')}
+                                {log.ip_address && ` • IP: ${log.ip_address}`}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </IOSCard>
             )}

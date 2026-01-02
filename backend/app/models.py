@@ -262,3 +262,20 @@ class ImpostazioniAzienda(Base):
     configurazioni_avanzate = Column(JSONB, default={})  # Parametri personalizzabili
     template_pdf_config = Column(JSONB, default={})  # Configurazione template PDF
     oauth_config = Column(JSONB, default={})  # Configurazione OAuth providers
+
+# --- MODELLO AUDIT LOG ---
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("utenti.id"), nullable=False, index=True)
+    user_email = Column(String, nullable=False)  # Snapshot email utente
+    user_nome = Column(String, nullable=False)  # Snapshot nome utente
+    action = Column(String, nullable=False, index=True)  # CREATE, UPDATE, DELETE
+    entity_type = Column(String, nullable=False, index=True)  # 'cliente', 'intervento', 'magazzino', 'utente'
+    entity_id = Column(Integer, nullable=False, index=True)  # ID dell'entità modificata
+    entity_name = Column(String, nullable=True)  # Nome descrittivo dell'entità (es: ragione_sociale, numero_relazione, codice_articolo)
+    changes = Column(JSONB, nullable=True)  # Dettagli delle modifiche: {"campo": {"old": valore_vecchio, "new": valore_nuovo}}
+    ip_address = Column(String, nullable=True)  # IP dell'utente
+    timestamp = Column(DateTime, default=datetime.now, nullable=False, index=True)
+    
+    user = relationship("Utente", backref="audit_logs")
