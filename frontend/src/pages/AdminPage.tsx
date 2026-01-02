@@ -25,10 +25,46 @@ export default function AdminPage() {
   // Aggiorna activeTab quando cambiano i query params (es. navigazione indietro)
   useEffect(() => {
     const tabFromParams = (searchParams.get('tab') as any) || 'users';
+    
+    // Verifica che la tab richiesta sia permessa per l'utente corrente
+    const isTabAllowed = (tab: string): boolean => {
+      if (user?.ruolo === 'admin' || user?.ruolo === 'superadmin') {
+        return true; // Admin e superadmin hanno accesso a tutte le tab
+      }
+      
+      switch (tab) {
+        case 'users':
+          return false; // Solo admin/superadmin
+        case 'clienti':
+          return user?.permessi?.can_view_clienti === true;
+        case 'magazzino':
+          return user?.permessi?.can_view_magazzino === true;
+        case 'interventi':
+          return user?.permessi?.can_view_interventi === true;
+        default:
+          return false;
+      }
+    };
+    
+    // Se la tab richiesta non è permessa, trova la prima tab permessa
+    if (!isTabAllowed(tabFromParams)) {
+      const allowedTabs = ['users', 'clienti', 'magazzino', 'interventi'].filter(isTabAllowed);
+      if (allowedTabs.length > 0) {
+        const firstAllowedTab = allowedTabs[0];
+        setSearchParams({ tab: firstAllowedTab }, { replace: true });
+        setActiveTab(firstAllowedTab as any);
+        return;
+      } else {
+        // Nessuna tab permessa, reindirizza alla home
+        navigate('/');
+        return;
+      }
+    }
+    
     if (tabFromParams !== activeTab) {
       setActiveTab(tabFromParams);
     }
-  }, [searchParams]);
+  }, [searchParams, user]);
 
   // Carica tutti i contatori all'avvio (per mostrare i numeri nelle tab)
   const loadAllCounts = async () => {
@@ -281,10 +317,22 @@ export default function AdminPage() {
       <main className="max-w-6xl mx-auto p-4 sm:p-6">
         {/* Tabs */}
         <div className="flex flex-wrap gap-3 mb-6">
-          <TabButton id="users" label="Utenti" icon={Users} count={users.length} />
-          <TabButton id="clienti" label="Clienti" icon={Building2} count={clienti.length} />
-          <TabButton id="magazzino" label="Magazzino" icon={Package} count={magazzino.length} />
-          <TabButton id="interventi" label="Interventi" icon={FileText} count={interventi.length} />
+          {/* Tab Utenti - solo per admin/superadmin */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin') && (
+            <TabButton id="users" label="Utenti" icon={Users} count={users.length} />
+          )}
+          {/* Tab Clienti - solo per admin/superadmin o operatori con permesso */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_view_clienti) && (
+            <TabButton id="clienti" label="Clienti" icon={Building2} count={clienti.length} />
+          )}
+          {/* Tab Magazzino - per admin/superadmin o operatori con permesso */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_view_magazzino) && (
+            <TabButton id="magazzino" label="Magazzino" icon={Package} count={magazzino.length} />
+          )}
+          {/* Tab Interventi - solo per admin/superadmin o operatori con permesso */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_view_interventi) && (
+            <TabButton id="interventi" label="Interventi" icon={FileText} count={interventi.length} />
+          )}
         </div>
 
         {/* Search Bar per Clienti, Magazzino e Interventi */}
@@ -418,13 +466,16 @@ export default function AdminPage() {
               <IOSCard>
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-bold text-gray-900">Gestione Magazzino</h2>
-                  <Link
-                    to="/nuovo-prodotto"
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Nuovo Prodotto
-                  </Link>
+                  {/* Mostra pulsante "Nuovo Prodotto" solo se l'utente ha il permesso */}
+                  {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_create_magazzino) && (
+                    <Link
+                      to="/nuovo-prodotto"
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Nuovo Prodotto
+                    </Link>
+                  )}
                 </div>
                 <div className="space-y-3">
                   {magazzino.map((p) => (
@@ -447,12 +498,15 @@ export default function AdminPage() {
                         >
                           {p.giacenza > 0 ? 'Disponibile' : 'Esaurito'}
                         </span>
-                        <Link
-                          to={`/nuovo-prodotto/${p.id}`}
-                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Link>
+                        {/* Mostra pulsante modifica solo se l'utente ha il permesso */}
+                        {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin' || user?.permessi?.can_edit_magazzino) && (
+                          <Link
+                            to={`/nuovo-prodotto/${p.id}`}
+                            className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Link>
+                        )}
                       </div>
                     </div>
                   ))}

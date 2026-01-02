@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusCircle, Users, LogOut, User } from 'lucide-react';
+import { PlusCircle, Users, LogOut, User, Package } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useNavigate } from 'react-router-dom';
@@ -95,7 +95,30 @@ export default function DashboardOperatorePage() {
           </div>
         </Link>
 
-        {/* Nota: Il magazzino è accessibile solo dai moduli intervento/sopralluogo */}
+        {/* Card Magazzino - Mostrata solo se l'utente ha i permessi */}
+        {(user?.permessi?.can_view_magazzino || user?.ruolo === 'admin' || user?.ruolo === 'superadmin') && (
+          <Link
+            to="/admin?tab=magazzino"
+            className="block bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden active:scale-[0.98] transition-transform"
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-purple-100 rounded-2xl flex items-center justify-center">
+                  <Package className="w-7 h-7 text-purple-600" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">Magazzino</h2>
+                  <p className="text-gray-500 text-sm">Gestisci prodotti e giacenze</p>
+                </div>
+                <div className="text-gray-300">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </Link>
+        )}
 
         {/* Spacer per iOS bottom safe area */}
         <div className="h-8" />

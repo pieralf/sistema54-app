@@ -91,7 +91,7 @@ function App() {
         <Route
           path="/nuovo-prodotto"
           element={
-            <ProtectedRoute requiredRole={['admin', 'superadmin']}>
+            <ProtectedRoute requiredPermission="can_create_magazzino">
               <NuovoProdottoPage />
             </ProtectedRoute>
           }
@@ -99,7 +99,7 @@ function App() {
         <Route
           path="/nuovo-prodotto/:id"
           element={
-            <ProtectedRoute requiredRole={['admin', 'superadmin']}>
+            <ProtectedRoute requiredPermission="can_edit_magazzino">
               <NuovoProdottoPage />
             </ProtectedRoute>
           }
@@ -107,7 +107,7 @@ function App() {
         <Route
           path="/admin"
           element={
-            <ProtectedRoute requiredRole={['admin', 'superadmin']}>
+            <ProtectedRoute>
               <AdminPage />
             </ProtectedRoute>
           }

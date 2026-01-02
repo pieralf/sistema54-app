@@ -5,13 +5,26 @@ export function getApiUrl(): string {
   const hostname = window.location.hostname;
   const port = '8000'; // Porta backend
   
+  // Controlla se si sta accedendo tramite proxy DNS (hostname diverso da IP diretto)
+  // Se l'hostname non è un IP diretto (contiene lettere o è un dominio), potrebbe essere un proxy
+  const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+  const isProxyAccess = !isIpAddress && hostname !== 'localhost' && hostname !== '127.0.0.1';
+  
+  if (isProxyAccess) {
+    // Se si accede tramite proxy DNS, usa percorso relativo che il proxy può inoltrare
+    // Assumendo che il proxy sia configurato per inoltrare /api/* al backend
+    const url = '/api';
+    console.log('[getApiUrl] Accesso tramite proxy DNS rilevato, usando percorso relativo:', url);
+    return url;
+  }
+  
   // Se è definita una variabile d'ambiente VITE_API_URL
   if (import.meta.env.VITE_API_URL) {
     const viteUrl = import.meta.env.VITE_API_URL;
     
     // Se VITE_API_URL contiene localhost ma si sta accedendo da remoto, ignoralo
     if (viteUrl.includes('localhost') && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      // Si sta accedendo da remoto, usa l'hostname corrente invece di localhost
+      // Si sta accedendo da remoto tramite IP diretto, usa l'hostname corrente invece di localhost
       const url = `http://${hostname}:${port}`;
       console.log('[getApiUrl] Accesso remoto rilevato, ignorando VITE_API_URL (localhost), usando:', url);
       return url;
@@ -26,19 +39,6 @@ export function getApiUrl(): string {
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     const url = `http://localhost:${port}`;
     console.log('[getApiUrl] Rilevato localhost, usando:', url);
-    return url;
-  }
-  
-  // Controlla se si sta accedendo tramite proxy DNS (hostname diverso da IP diretto)
-  // Se l'hostname non è un IP diretto (contiene lettere o è un dominio), potrebbe essere un proxy
-  const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
-  const isProxyAccess = !isIpAddress && hostname !== 'localhost' && hostname !== '127.0.0.1';
-  
-  if (isProxyAccess) {
-    // Se si accede tramite proxy DNS, usa percorso relativo che il proxy può inoltrare
-    // Assumendo che il proxy sia configurato per inoltrare /api/* al backend
-    const url = '/api';
-    console.log('[getApiUrl] Accesso tramite proxy DNS rilevato, usando percorso relativo:', url);
     return url;
   }
   

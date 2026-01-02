@@ -8,6 +8,7 @@ interface User {
   email: string;
   nome_completo: string;
   ruolo: string;
+  permessi?: Record<string, boolean>;
 }
 
 interface AuthState {
