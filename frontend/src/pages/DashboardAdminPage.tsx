@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusCircle, Users, Package, Archive, Settings, User, Activity, LogOut, Shield } from 'lucide-react';
+import { PlusCircle, Users, Package, Archive, Settings, User, Activity, LogOut, Shield, FileText } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +13,8 @@ export default function DashboardAdminPage() {
   const navigate = useNavigate();
   const [interventiOggi, setInterventiOggi] = useState(0);
   const [apiStatus, setApiStatus] = useState<'online' | 'offline'>('offline');
+  const [ultimeModifiche, setUltimeModifiche] = useState<any[]>([]);
+  const [ultimiRIT, setUltimiRIT] = useState<any[]>([]);
 
   useEffect(() => {
     loadSettings();
@@ -60,12 +62,47 @@ export default function DashboardAdminPage() {
       }
     };
 
+    // Carica ultime 10 modifiche
+    const loadUltimeModifiche = async () => {
+      try {
+        const res = await axios.get(`${getApiUrl()}/api/audit-logs/?limit=10`);
+        setUltimeModifiche(res.data || []);
+      } catch (err) {
+        console.error('Errore caricamento ultime modifiche:', err);
+      }
+    };
+
+    // Carica ultimi 10 RIT creati
+    const loadUltimiRIT = async () => {
+      try {
+        const res = await axios.get(`${getApiUrl()}/interventi/?limit=10`);
+        // Ordina per data creazione decrescente e prendi i primi 10
+        const sorted = (res.data || []).sort((a: any, b: any) => {
+          return new Date(b.data_creazione).getTime() - new Date(a.data_creazione).getTime();
+        });
+        setUltimiRIT(sorted.slice(0, 10));
+      } catch (err) {
+        console.error('Errore caricamento ultimi RIT:', err);
+      }
+    };
+
     loadInterventiOggi();
     checkApiStatus();
-    const interval = setInterval(checkApiStatus, 30000); // Check ogni 30 secondi
+    if (user?.ruolo === 'admin' || user?.ruolo === 'superadmin') {
+      loadUltimeModifiche();
+    }
+    loadUltimiRIT();
+    
+    const interval = setInterval(() => {
+      checkApiStatus();
+      if (user?.ruolo === 'admin' || user?.ruolo === 'superadmin') {
+        loadUltimeModifiche();
+      }
+      loadUltimiRIT();
+    }, 30000); // Check ogni 30 secondi
 
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -171,7 +208,7 @@ export default function DashboardAdminPage() {
           </Link>
         </div>
 
-        {/* Seconda riga - Utenti */}
+        {/* Seconda riga - Utenti e Log */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
           {/* Card Utenti */}
           <Link
@@ -186,6 +223,22 @@ export default function DashboardAdminPage() {
               <p className="mt-1 text-sm text-slate-500">Gestisci utenti e permessi</p>
             </div>
           </Link>
+
+          {/* Card Log - solo per admin/superadmin */}
+          {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin') && (
+            <Link
+              to="/admin?tab=logs"
+              className="group relative overflow-hidden rounded-2xl bg-white p-6 shadow-lg border border-slate-100 transition-transform hover:scale-[1.02] hover:shadow-xl"
+            >
+              <div className="relative z-10">
+                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600">
+                  <FileText className="h-6 w-6" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-800">Log</h3>
+                <p className="mt-1 text-sm text-slate-500">Traccia operazioni e modifiche</p>
+              </div>
+            </Link>
+          )}
         </div>
 
         {/* Stato Sistema */}
@@ -194,7 +247,9 @@ export default function DashboardAdminPage() {
             <Activity className="w-5 h-5 text-slate-600" />
             <h2 className="text-lg font-bold text-slate-800">Stato Sistema</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* Statistiche principali */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <p className="text-sm text-slate-500 mb-2">Interventi Oggi</p>
               <p className="text-3xl font-bold text-slate-900">{interventiOggi}</p>
@@ -225,6 +280,88 @@ export default function DashboardAdminPage() {
               <p className="text-xs text-slate-400 mt-1">
                 Verifica connessione backend ogni 30s
               </p>
+            </div>
+          </div>
+
+          {/* Ultime modifiche e ultimi RIT */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 border-t border-slate-200 pt-6">
+            {/* Ultime 10 Modifiche */}
+            {(user?.ruolo === 'admin' || user?.ruolo === 'superadmin') && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Ultime 10 Modifiche</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {ultimeModifiche.length === 0 ? (
+                    <p className="text-xs text-slate-400">Nessuna modifica recente</p>
+                  ) : (
+                    ultimeModifiche.map((log) => {
+                      const actionColors: { [key: string]: string } = {
+                        CREATE: 'bg-green-100 text-green-700',
+                        UPDATE: 'bg-blue-100 text-blue-700',
+                        DELETE: 'bg-red-100 text-red-700'
+                      };
+                      const entityLabels: { [key: string]: string } = {
+                        cliente: 'Cliente',
+                        intervento: 'RIT',
+                        magazzino: 'Magazzino',
+                        utente: 'Utente'
+                      };
+                      
+                      return (
+                        <div
+                          key={log.id}
+                          className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg text-xs"
+                        >
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${actionColors[log.action] || 'bg-gray-100 text-gray-700'}`}>
+                            {log.action}
+                          </span>
+                          <span className="text-slate-600 font-semibold">
+                            {entityLabels[log.entity_type] || log.entity_type}
+                          </span>
+                          {log.entity_name && (
+                            <span className="text-slate-700 truncate flex-1">
+                              {log.entity_name}
+                            </span>
+                          )}
+                          <span className="text-slate-400 text-[10px]">
+                            {new Date(log.timestamp).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Ultimi 10 RIT Creati */}
+            <div>
+              <h3 className="text-sm font-semibold text-slate-700 mb-3">Ultimi 10 RIT Creati</h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {ultimiRIT.length === 0 ? (
+                  <p className="text-xs text-slate-400">Nessun RIT recente</p>
+                ) : (
+                  ultimiRIT.map((rit) => (
+                    <Link
+                      key={rit.id}
+                      to={`/edit-rit/${rit.id}`}
+                      className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg text-xs hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700">
+                        RIT
+                      </span>
+                      <span className="text-slate-700 font-semibold">
+                        {rit.numero_relazione}
+                      </span>
+                      <span className="text-slate-600 truncate flex-1">
+                        {rit.cliente_ragione_sociale}
+                      </span>
+                      <span className="text-slate-400 text-[10px]">
+                        {new Date(rit.data_creazione).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </Link>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
