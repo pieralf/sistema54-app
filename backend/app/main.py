@@ -481,11 +481,168 @@ print("  - Contratti (noleggio e assistenza): ogni lunedì alle 9:00")
 print("  - Letture copie: ogni giorno alle 9:00")
 
 # --- FUNZIONE MOCK EMAIL ---
-def send_email_background(email_to: str, pdf_content: bytes, numero_rit: str, azienda_nome: str):
-    print(f"--- [EMAIL MOCK] ---")
-    print(f"TO: {email_to}")
-    print(f"OGGETTO: Rapporto Intervento {numero_rit} - {azienda_nome}")
-    print("--------------------")
+def send_email_background(
+    email_to: str, 
+    pdf_content: bytes, 
+    numero_rit: str, 
+    azienda_nome: str, 
+    data_intervento: datetime,
+    azienda_indirizzo: str = "",
+    azienda_telefono: str = "",
+    azienda_email: str = "",
+    db: Session = None
+):
+    """
+    Invia email con PDF del RIT al destinatario specificato.
+    Se db è fornito, usa il servizio email reale, altrimenti usa mock.
+    """
+    if not db:
+        # Mock mode (per compatibilità)
+        print(f"--- [EMAIL MOCK] ---")
+        print(f"TO: {email_to}")
+        print(f"OGGETTO: Rapporto Intervento Tecnico {azienda_nome} del {data_intervento.strftime('%d/%m/%Y')}")
+        print("--------------------")
+        return
+    
+    try:
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
+        from email import encoders
+        import base64
+        
+        # Ottieni configurazione SMTP
+        smtp_config = email_service.get_smtp_config(db)
+        if not smtp_config.get('username') or not smtp_config.get('password'):
+            # Se SMTP non configurato, usa mock
+            print(f"--- [EMAIL MOCK - SMTP non configurato] ---")
+            print(f"TO: {email_to}")
+            print(f"OGGETTO: Rapporto Intervento Tecnico {azienda_nome} del {data_intervento.strftime('%d/%m/%Y')}")
+            print("--------------------")
+            return
+        
+        # Formatta data intervento
+        data_intervento_formattata = data_intervento.strftime('%d/%m/%Y')
+        
+        # Crea messaggio
+        msg = MIMEMultipart()
+        msg['From'] = smtp_config.get('from_email', smtp_config.get('username'))
+        msg['To'] = email_to
+        msg['Subject'] = f"Rapporto Intervento Tecnico {azienda_nome} del {data_intervento_formattata}"
+        
+        # Prepara dati azienda per il footer
+        footer_azienda = azienda_nome
+        if azienda_indirizzo:
+            footer_azienda += f"\n{azienda_indirizzo}"
+        if azienda_telefono:
+            footer_azienda += f"\nTel: {azienda_telefono}"
+        if azienda_email:
+            footer_azienda += f"\nEmail: {azienda_email}"
+        
+        # Corpo email formale con GDPR
+        body_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.8; color: #333; }}
+                .container {{ max-width: 700px; margin: 0 auto; padding: 20px; }}
+                .content {{ background-color: #ffffff; padding: 30px; border: 1px solid #e5e7eb; }}
+                .footer {{ background-color: #f3f4f6; padding: 20px; font-size: 11px; color: #6b7280; border-top: 2px solid #e5e7eb; margin-top: 30px; }}
+                p {{ margin-bottom: 15px; }}
+                .signature {{ margin-top: 30px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="content">
+                    <p>Gentile Cliente,</p>
+                    
+                    <p>con la presente Le trasmettiamo in allegato il Rapporto di Intervento Tecnico, relativo all'attività svolta presso la Sua sede e/o sul sistema di Sua competenza il giorno <strong>{data_intervento_formattata}</strong>, a seguito della chiusura del RIT aperto per intervento richiesto o intervento ordinario.</p>
+                    
+                    <p>Il documento riepiloga le operazioni effettuate, le eventuali verifiche eseguite e l'esito finale dell'intervento, e viene inviato per finalità di:</p>
+                    
+                    <ul>
+                        <li>adempimento contrattuale e/o precontrattuale;</li>
+                        <li>corretta gestione del rapporto commerciale e tecnico in essere;</li>
+                        <li>tracciabilità e documentazione delle attività svolte.</li>
+                    </ul>
+                    
+                    <p>Ai sensi del Regolamento (UE) 2016/679 (GDPR) e della normativa nazionale vigente in materia di protezione dei dati personali, il trattamento dei dati contenuti nel rapporto avviene esclusivamente per le finalità sopra indicate, nel rispetto dei principi di liceità, correttezza, trasparenza e minimizzazione dei dati.</p>
+                    
+                    <p>La base giuridica del trattamento è costituita dall'esecuzione di obblighi contrattuali e/o di misure precontrattuali (art. 6, par. 1, lett. b GDPR), nonché dall'adempimento di obblighi di legge e da legittimi interessi del Titolare del trattamento connessi alla gestione tecnica e amministrativa del servizio.</p>
+                    
+                    <p>Il documento allegato è destinato esclusivamente al destinatario indicato. Qualora lo abbia ricevuto per errore, La invitiamo a darcene tempestiva comunicazione e a procedere alla sua cancellazione, astenendosi da qualsiasi utilizzo o diffusione non autorizzata.</p>
+                    
+                    <p>Restiamo a disposizione per eventuali chiarimenti o ulteriori necessità.</p>
+                    
+                    <p class="signature">Cordiali saluti,<br>
+                    <strong>{footer_azienda}</strong></p>
+                </div>
+                <div class="footer">
+                    <p><strong>Nota:</strong> Questa è una comunicazione automatica. Si prega di non rispondere direttamente a questa email.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        body_text = f"""Rapporto Intervento Tecnico
+
+Gentile Cliente,
+
+con la presente Le trasmettiamo in allegato il Rapporto di Intervento Tecnico, relativo all'attività svolta presso la Sua sede e/o sul sistema di Sua competenza il giorno {data_intervento_formattata}, a seguito della chiusura del RIT aperto per intervento richiesto o intervento ordinario.
+
+Il documento riepiloga le operazioni effettuate, le eventuali verifiche eseguite e l'esito finale dell'intervento, e viene inviato per finalità di:
+
+- adempimento contrattuale e/o precontrattuale;
+- corretta gestione del rapporto commerciale e tecnico in essere;
+- tracciabilità e documentazione delle attività svolte.
+
+Ai sensi del Regolamento (UE) 2016/679 (GDPR) e della normativa nazionale vigente in materia di protezione dei dati personali, il trattamento dei dati contenuti nel rapporto avviene esclusivamente per le finalità sopra indicate, nel rispetto dei principi di liceità, correttezza, trasparenza e minimizzazione dei dati.
+
+La base giuridica del trattamento è costituita dall'esecuzione di obblighi contrattuali e/o di misure precontrattuali (art. 6, par. 1, lett. b GDPR), nonché dall'adempimento di obblighi di legge e da legittimi interessi del Titolare del trattamento connessi alla gestione tecnica e amministrativa del servizio.
+
+Il documento allegato è destinato esclusivamente al destinatario indicato. Qualora lo abbia ricevuto per errore, La invitiamo a darcene tempestiva comunicazione e a procedere alla sua cancellazione, astenendosi da qualsiasi utilizzo o diffusione non autorizzata.
+
+Restiamo a disposizione per eventuali chiarimenti o ulteriori necessità.
+
+Cordiali saluti,
+{footer_azienda}
+
+---
+Nota: Questa è una comunicazione automatica. Si prega di non rispondere direttamente a questa email.
+        """
+        
+        # Aggiungi corpo
+        msg.attach(MIMEText(body_text, 'plain'))
+        msg.attach(MIMEText(body_html, 'html'))
+        
+        # Aggiungi PDF come allegato
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(pdf_content)
+        encoders.encode_base64(part)
+        part.add_header(
+            'Content-Disposition',
+            f'attachment; filename= "{numero_rit}.pdf"'
+        )
+        msg.attach(part)
+        
+        # Invia email
+        import smtplib
+        with smtplib.SMTP(smtp_config.get('host', 'smtp.gmail.com'), smtp_config.get('port', 587)) as server:
+            if smtp_config.get('use_tls', True):
+                server.starttls()
+            server.login(smtp_config.get('username'), smtp_config.get('password'))
+            server.send_message(msg)
+        
+        print(f"✅ Email inviata con successo a {email_to} per RIT {numero_rit}")
+        
+    except Exception as e:
+        print(f"⚠️ Errore invio email a {email_to}: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def genera_numero_rit(db: Session) -> str:
     anno_corrente = datetime.now().year
@@ -1643,17 +1800,68 @@ def create_intervento(
         # 6. Invio Email (Gestito fuori dalla transazione DB)
         try:
             cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento.cliente_id).first()
+            pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings)
+            
+            # Data intervento (usa data_creazione se non c'è data_intervento specifica)
+            data_intervento_email = db_intervento.data_creazione
+            
+            # Dati azienda per footer email
+            azienda_indirizzo = settings.indirizzo_completo or ""
+            azienda_telefono = settings.telefono or ""
+            azienda_email_contatto = settings.email or ""
+            
+            # Email al cliente (se ha email amministrazione)
             if cliente and cliente.email_amministrazione:
-                pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings)
                 background_tasks.add_task(
                     send_email_background,
                     cliente.email_amministrazione,
                     pdf_bytes,
                     db_intervento.numero_relazione,
-                    settings.nome_azienda
+                    settings.nome_azienda,
+                    data_intervento_email,
+                    azienda_indirizzo,
+                    azienda_telefono,
+                    azienda_email_contatto,
+                    db
+                )
+            
+            # Email alla sede di intervento (se presente e ha email)
+            if db_intervento.sede_id:
+                sede = db.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento.sede_id).first()
+                if sede and sede.email:
+                    background_tasks.add_task(
+                        send_email_background,
+                        sede.email,
+                        pdf_bytes,
+                        db_intervento.numero_relazione,
+                        settings.nome_azienda,
+                        data_intervento_email,
+                        azienda_indirizzo,
+                        azienda_telefono,
+                        azienda_email_contatto,
+                        db
+                    )
+            
+            # Email all'azienda (se configurata)
+            # Usa email_notifiche_scadenze se disponibile, altrimenti email principale
+            email_azienda = settings.email_notifiche_scadenze or settings.email
+            if email_azienda:
+                background_tasks.add_task(
+                    send_email_background,
+                    email_azienda,
+                    pdf_bytes,
+                    db_intervento.numero_relazione,
+                    settings.nome_azienda,
+                    data_intervento_email,
+                    azienda_indirizzo,
+                    azienda_telefono,
+                    azienda_email_contatto,
+                    db
                 )
         except Exception as e:
             print(f"Warning: Errore generazione email: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Converti campi time in stringhe prima di restituire
         # Usa model_validate per gestire automaticamente le relazioni
