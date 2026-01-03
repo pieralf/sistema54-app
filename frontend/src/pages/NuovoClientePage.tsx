@@ -486,6 +486,140 @@ export default function NuovoClientePage() {
     });
   };
 
+  // Funzione per salvare solo una sezione specifica
+  const saveSection = async (section: 'anagrafica' | 'configurazioni' | 'contratto') => {
+    if (!isEdit || !id) {
+      alert('Funzione disponibile solo in modalità modifica');
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+
+    try {
+      // Ottieni i valori attuali del form
+      const formValues = watch();
+      
+      // Prepara gli assets rimuovendo i campi temporanei tipo_configurazione e convertendo le date
+      const assetsToSend = watch('has_noleggio') ? assetsNoleggio.map((asset: any) => {
+        const { tipo_configurazione_bn, tipo_configurazione_colore, ...assetClean } = asset;
+        
+        // Converti data_installazione in formato ISO se presente (e non vuota)
+        if (assetClean.data_installazione && assetClean.data_installazione.trim && assetClean.data_installazione.trim() !== '') {
+          try {
+            assetClean.data_installazione = new Date(assetClean.data_installazione).toISOString();
+          } catch (e) {
+            assetClean.data_installazione = null;
+          }
+        } else if (assetClean.data_installazione && typeof assetClean.data_installazione === 'string' && assetClean.data_installazione !== '') {
+          try {
+            assetClean.data_installazione = new Date(assetClean.data_installazione).toISOString();
+          } catch (e) {
+            assetClean.data_installazione = null;
+          }
+        } else {
+          assetClean.data_installazione = null;
+        }
+        
+        // Converti data_scadenza_noleggio in formato ISO se presente (e non vuota)
+        if (assetClean.data_scadenza_noleggio && assetClean.data_scadenza_noleggio.trim && assetClean.data_scadenza_noleggio.trim() !== '') {
+          try {
+            assetClean.data_scadenza_noleggio = new Date(assetClean.data_scadenza_noleggio).toISOString();
+          } catch (e) {
+            assetClean.data_scadenza_noleggio = null;
+          }
+        } else if (assetClean.data_scadenza_noleggio && typeof assetClean.data_scadenza_noleggio === 'string' && assetClean.data_scadenza_noleggio !== '') {
+          try {
+            assetClean.data_scadenza_noleggio = new Date(assetClean.data_scadenza_noleggio).toISOString();
+          } catch (e) {
+            assetClean.data_scadenza_noleggio = null;
+          }
+        } else {
+          assetClean.data_scadenza_noleggio = null;
+        }
+        
+        // Assicurati che i contatori iniziali siano 0 se null (per il backend)
+        if (assetClean.contatore_iniziale_bn === null || assetClean.contatore_iniziale_bn === undefined) {
+          assetClean.contatore_iniziale_bn = 0;
+        }
+        if (assetClean.contatore_iniziale_colore === null || assetClean.contatore_iniziale_colore === undefined) {
+          assetClean.contatore_iniziale_colore = 0;
+        }
+        
+        // Assicurati che sede_id sia null se non valido (non può essere 0)
+        if (assetClean.sede_id === 0 || assetClean.sede_id === '0' || assetClean.sede_id === '') {
+          assetClean.sede_id = null;
+        }
+        
+        return assetClean;
+      }) : [];
+      
+      // Combina indirizzo e numero civico
+      const indirizzoCompleto = formValues.numero_civico 
+        ? `${formValues.indirizzo || ''}, ${formValues.numero_civico}`.trim()
+        : (formValues.indirizzo || '');
+      
+      // Costruisci il payload in base alla sezione da salvare
+      let payload: any = {};
+      
+      if (section === 'anagrafica') {
+        // Solo dati anagrafici
+        payload = {
+          ragione_sociale: formValues.ragione_sociale || '',
+          indirizzo: indirizzoCompleto,
+          citta: formValues.citta || '',
+          cap: formValues.cap || '',
+          p_iva: formValues.p_iva || '',
+          codice_fiscale: formValues.codice_fiscale || '',
+          email_amministrazione: formValues.email_amministrazione || '',
+          is_pa: Boolean(formValues.is_pa),
+          codice_sdi: formValues.codice_sdi || '',
+          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
+          has_noleggio: Boolean(formValues.has_noleggio),
+          has_multisede: Boolean(formValues.has_multisede),
+          sede_legale_operativa: Boolean(formValues.sede_legale_operativa),
+          sedi: hasMultisede ? sedi : [],
+          assets_noleggio: assetsToSend
+        };
+      } else if (section === 'configurazioni') {
+        // Solo configurazioni
+        payload = {
+          is_pa: Boolean(formValues.is_pa),
+          codice_sdi: formValues.codice_sdi || '',
+          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
+          has_noleggio: Boolean(formValues.has_noleggio),
+          has_multisede: Boolean(formValues.has_multisede),
+          sede_legale_operativa: Boolean(formValues.sede_legale_operativa),
+          sedi: hasMultisede ? sedi : [],
+          assets_noleggio: assetsToSend
+        };
+      } else if (section === 'contratto') {
+        // Solo dettagli contratto assistenza
+        payload = {
+          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
+          data_inizio_contratto_assistenza: formValues.data_inizio_contratto_assistenza || null,
+          data_fine_contratto_assistenza: formValues.data_fine_contratto_assistenza || null,
+          limite_chiamate_contratto: formValues.limite_chiamate_contratto || null,
+          costo_chiamata_fuori_limite: formValues.costo_chiamata_fuori_limite || null
+        };
+      }
+      
+      console.log(`[Salvataggio sezione ${section}] Payload:`, JSON.stringify(payload, null, 2));
+
+      await axios.put(`${getApiUrl()}/clienti/${id}`, payload);
+      alert(`Sezione "${section === 'anagrafica' ? 'Dati Anagrafici' : section === 'configurazioni' ? 'Configurazioni' : 'Contratto Assistenza'}" salvata con successo!`);
+      
+      // Ricarica i dati del cliente per aggiornare il form
+      await loadCliente();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Errore durante il salvataggio';
+      setError(msg);
+      console.error('Errore salvataggio sezione:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const onSubmit = async (data: any) => {
     setIsSaving(true);
     setError('');
@@ -621,9 +755,22 @@ export default function NuovoClientePage() {
 
         <form onSubmit={handleSubmit(onSubmit)}>
           <IOSCard>
-            <div className="flex items-center gap-2 mb-6">
-              <Building2 className="w-5 h-5 text-blue-600" />
-              <h2 className="text-lg font-bold text-gray-900">Dati Anagrafici</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                <h2 className="text-lg font-bold text-gray-900">Dati Anagrafici</h2>
+              </div>
+              {isEdit && (
+                <button
+                  type="button"
+                  onClick={() => saveSection('anagrafica')}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  Salva
+                </button>
+              )}
             </div>
 
             <IOSInput
@@ -675,9 +822,22 @@ export default function NuovoClientePage() {
           </IOSCard>
 
           <IOSCard>
-            <div className="flex items-center gap-2 mb-6">
-              <UserPlus className="w-5 h-5 text-purple-600" />
-              <h2 className="text-lg font-bold text-gray-900">Configurazioni</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-purple-600" />
+                <h2 className="text-lg font-bold text-gray-900">Configurazioni</h2>
+              </div>
+              {isEdit && (
+                <button
+                  type="button"
+                  onClick={() => saveSection('configurazioni')}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-semibold disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  Salva
+                </button>
+              )}
             </div>
 
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4">
@@ -736,10 +896,23 @@ export default function NuovoClientePage() {
 
           {hasContrattoAssistenza && (
             <IOSCard className="mt-6 border-l-4 border-l-green-600 shadow-md">
-              <h2 className="text-lg font-bold text-gray-900 mb-5 flex items-center">
-                <Package className="w-5 h-5 mr-2 text-green-600" />
-                Dettagli Contratto di Assistenza
-              </h2>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center">
+                  <Package className="w-5 h-5 mr-2 text-green-600" />
+                  Dettagli Contratto di Assistenza
+                </h2>
+                {isEdit && (
+                  <button
+                    type="button"
+                    onClick={() => saveSection('contratto')}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    Salva
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <IOSInput
                   label="Data Inizio Contratto"
