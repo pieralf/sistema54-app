@@ -271,30 +271,40 @@ def genera_pdf_intervento(intervento, azienda_settings) -> bytes:
             # Le informazioni dell'asset dovrebbero essere già incluse nelle letture copie
             # quando vengono caricate prima di chiamare questa funzione
             letture_copie_dettagli = []
-            if intervento.is_prelievo_copie and hasattr(intervento, 'letture_copie') and intervento.letture_copie:
-                for lettura in intervento.letture_copie:
-                    # Parse delle note per estrarre i dettagli del calcolo
-                    note = lettura.note or ""
-                    
-                    # Estrai informazioni asset se disponibili (aggiunte durante il caricamento)
-                    asset_marca = getattr(lettura, 'asset_marca', '') or ''
-                    asset_modello = getattr(lettura, 'asset_modello', '') or ''
-                    asset_marca_modello = getattr(lettura, 'asset_marca_modello', '') or ''
-                    
-                    # Se non disponibili, prova a costruirle da marca e modello
-                    if not asset_marca_modello and (asset_marca or asset_modello):
-                        asset_marca_modello = f"{asset_marca} {asset_modello}".strip() or 'N/A'
-                    
-                    letture_copie_dettagli.append({
-                        'asset_id': lettura.asset_id,
-                        'data_lettura': lettura.data_lettura,
-                        'contatore_bn': lettura.contatore_bn,
-                        'contatore_colore': lettura.contatore_colore,
-                        'note': note,
-                        'asset_marca': asset_marca,
-                        'asset_modello': asset_modello,
-                        'asset_marca_modello': asset_marca_modello or 'N/A'
-                    })
+            if intervento.is_prelievo_copie:
+                print(f"[PDF GENERATION] Prelievo copie rilevato per RIT {intervento.numero_relazione}")
+                print(f"[PDF GENERATION] hasattr(intervento, 'letture_copie'): {hasattr(intervento, 'letture_copie')}")
+                if hasattr(intervento, 'letture_copie') and intervento.letture_copie:
+                    print(f"[PDF GENERATION] Trovate {len(intervento.letture_copie)} letture copie")
+                    for lettura in intervento.letture_copie:
+                        # Parse delle note per estrarre i dettagli del calcolo
+                        note = lettura.note or ""
+                        
+                        # Estrai informazioni asset se disponibili (aggiunte durante il caricamento)
+                        asset_marca = getattr(lettura, 'asset_marca', '') or ''
+                        asset_modello = getattr(lettura, 'asset_modello', '') or ''
+                        asset_marca_modello = getattr(lettura, 'asset_marca_modello', '') or ''
+                        
+                        print(f"[PDF GENERATION] Lettura {lettura.id}: asset_id={lettura.asset_id}, asset_marca_modello={asset_marca_modello}")
+                        
+                        # Se non disponibili, prova a costruirle da marca e modello
+                        if not asset_marca_modello and (asset_marca or asset_modello):
+                            asset_marca_modello = f"{asset_marca} {asset_modello}".strip() or 'N/A'
+                        
+                        letture_copie_dettagli.append({
+                            'asset_id': lettura.asset_id,
+                            'data_lettura': lettura.data_lettura,
+                            'contatore_bn': lettura.contatore_bn,
+                            'contatore_colore': lettura.contatore_colore,
+                            'note': note,
+                            'asset_marca': asset_marca,
+                            'asset_modello': asset_modello,
+                            'asset_marca_modello': asset_marca_modello or 'N/A'
+                        })
+                else:
+                    print(f"[PDF GENERATION] ATTENZIONE: Nessuna lettura copie trovata per prelievo copie!")
+            
+            print(f"[PDF GENERATION] Totale letture_copie_dettagli preparate: {len(letture_copie_dettagli)}")
             
             # Verifica se è solo prelievo copie (nessun dettaglio o ricambi significativi)
             has_manutenzione = False

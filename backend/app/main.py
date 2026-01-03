@@ -43,6 +43,10 @@ def convert_intervento_time_fields(intervento: models.Intervento) -> dict:
 # Creazione Tabelle (In produzione useremo Alembic, per ora va bene così)
 models.Base.metadata.create_all(bind=database.engine)
 
+# Set globale per tracciare gli interventi per cui l'email è già stata programmata
+# Questo evita di inviare email multiple quando vengono create più letture copie rapidamente
+_interventi_email_programmate = set()
+
 app = FastAPI(title="SISTEMA54 Digital API - CMMS")
 
 # Configurazione CORS (Fondamentale per far parlare Frontend e Backend)
@@ -1798,93 +1802,188 @@ def create_intervento(
         )
 
         # 6. Invio Email (Gestito fuori dalla transazione DB)
+        # IMPORTANTE: Per i prelievi copie, le letture copie vengono create DOPO la creazione dell'intervento
+        # dal frontend. Quindi durante la creazione iniziale, le letture copie potrebbero non essere ancora disponibili.
+        # L'email verrà inviata durante l'update quando le letture copie sono disponibili.
+        # Tuttavia, se le letture copie vengono create immediatamente dopo la creazione dell'intervento,
+        # verranno trovate e l'email verrà inviata.
         try:
-            # Ricarica l'intervento con tutte le relazioni per generare il PDF corretto
-            # Questo è necessario perché dopo il commit le relazioni potrebbero non essere ancora disponibili
-            db.refresh(db_intervento)
-            # Forza il caricamento delle relazioni
-            _ = db_intervento.dettagli  # Carica dettagli
-            _ = db_intervento.ricambi_utilizzati  # Carica ricambi
-            
-            # Carica letture copie con informazioni asset se è un prelievo copie
+            # Verifica se è un prelievo copie
             if db_intervento.is_prelievo_copie:
-                db_intervento.letture_copie = db.query(models.LetturaCopie).filter(
+                # Per i prelievi copie, verifica se ci sono già letture copie associate
+                # Le letture copie vengono create dal frontend DOPO la creazione dell'intervento,
+                # quindi potrebbero non essere ancora disponibili durante la creazione iniziale
+                letture_copie_count = db.query(models.LetturaCopie).filter(
                     models.LetturaCopie.intervento_id == db_intervento.id
-                ).all()
+                ).count()
                 
-                # Carica informazioni asset per ogni lettura copie
-                for lettura in db_intervento.letture_copie:
-                    if lettura.asset_id:
-                        asset = db.query(models.AssetCliente).filter(models.AssetCliente.id == lettura.asset_id).first()
-                        if asset:
-                            # Aggiungi informazioni asset alla lettura (come attributi temporanei)
-                            lettura.asset_marca = asset.marca or ''
-                            lettura.asset_modello = asset.modello or ''
-                            lettura.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
-            
-            # Ricarica anche le impostazioni azienda per assicurarsi che siano aggiornate
-            # e che contengano tutti i dati necessari per l'intestazione del PDF
-            settings_refreshed = get_settings_or_default(db)
-            
-            cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento.cliente_id).first()
-            pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings_refreshed)
-            
-            # Data intervento (usa data_creazione se non c'è data_intervento specifica)
-            data_intervento_email = db_intervento.data_creazione
-            
-            # Dati azienda per footer email
-            azienda_indirizzo = settings.indirizzo_completo or ""
-            azienda_telefono = settings.telefono or ""
-            azienda_email_contatto = settings.email or ""
-            
-            # Email al cliente (se ha email amministrazione)
-            if cliente and cliente.email_amministrazione:
-                background_tasks.add_task(
-                    send_email_background,
-                    cliente.email_amministrazione,
-                    pdf_bytes,
-                    db_intervento.numero_relazione,
-                    settings.nome_azienda,
-                    data_intervento_email,
-                    azienda_indirizzo,
-                    azienda_telefono,
-                    azienda_email_contatto,
-                    db
-                )
-            
-            # Email alla sede di intervento (se presente e ha email)
-            if db_intervento.sede_id:
-                sede = db.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento.sede_id).first()
-                if sede and sede.email:
+                print(f"[CREATE EMAIL PDF] Prelievo copie rilevato - Letture copie trovate: {letture_copie_count}")
+                
+                if letture_copie_count == 0:
+                    print(f"[CREATE EMAIL PDF] Prelievo copie senza letture copie - Email NON inviata durante creazione")
+                    print(f"[CREATE EMAIL PDF] L'email verrà inviata durante l'update quando le letture copie saranno disponibili")
+                    # Non inviare email durante la creazione per prelievi copie senza letture
+                    pass
+                else:
+                    # Se ci sono già letture copie, procedi con l'invio
+                    print(f"[CREATE EMAIL PDF] Prelievo copie con {letture_copie_count} letture copie - Generazione PDF per email")
+                    
+                    # Ricarica completamente l'intervento dalla sessione per assicurarsi che tutte le modifiche siano salvate
+                    db_intervento_fresh = db.query(models.Intervento).filter(models.Intervento.id == db_intervento.id).first()
+                    if not db_intervento_fresh:
+                        print(f"[CREATE EMAIL PDF] ERRORE: Intervento {db_intervento.id} non trovato dopo il commit!")
+                        raise Exception(f"Intervento {db_intervento.id} non trovato")
+                    
+                    # Forza il caricamento delle relazioni
+                    _ = db_intervento_fresh.dettagli  # Carica dettagli
+                    _ = db_intervento_fresh.ricambi_utilizzati  # Carica ricambi
+                    
+                    # Carica letture copie con informazioni asset
+                    db_intervento_fresh.letture_copie = db.query(models.LetturaCopie).filter(
+                        models.LetturaCopie.intervento_id == db_intervento_fresh.id
+                    ).all()
+                    
+                    print(f"[CREATE EMAIL PDF] Letture copie caricate dal DB: {len(db_intervento_fresh.letture_copie)}")
+                    
+                    # Carica informazioni asset per ogni lettura copie
+                    for lettura in db_intervento_fresh.letture_copie:
+                        if lettura.asset_id:
+                            asset = db.query(models.AssetCliente).filter(models.AssetCliente.id == lettura.asset_id).first()
+                            if asset:
+                                # Aggiungi informazioni asset alla lettura (come attributi temporanei)
+                                lettura.asset_marca = asset.marca or ''
+                                lettura.asset_modello = asset.modello or ''
+                                lettura.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
+                                print(f"[CREATE EMAIL PDF] Asset caricato per lettura {lettura.id}: {lettura.asset_marca_modello}")
+                    
+                    # Ricarica anche le impostazioni azienda
+                    settings_refreshed = get_settings_or_default(db)
+                    
+                    cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento_fresh.cliente_id).first()
+                    pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento_fresh, settings_refreshed)
+                    
+                    # Invia email (codice esistente)
+                    data_intervento_email = db_intervento_fresh.data_creazione
+                    azienda_indirizzo = settings_refreshed.indirizzo_completo or ""
+                    azienda_telefono = settings_refreshed.telefono or ""
+                    azienda_email_contatto = settings_refreshed.email or ""
+                    
+                    if cliente and cliente.email_amministrazione:
+                        background_tasks.add_task(
+                            send_email_background,
+                            cliente.email_amministrazione,
+                            pdf_bytes,
+                            db_intervento_fresh.numero_relazione,
+                            settings_refreshed.nome_azienda,
+                            data_intervento_email,
+                            azienda_indirizzo,
+                            azienda_telefono,
+                            azienda_email_contatto,
+                            db
+                        )
+                    
+                    if db_intervento_fresh.sede_id:
+                        sede = db.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento_fresh.sede_id).first()
+                        if sede and sede.email:
+                            background_tasks.add_task(
+                                send_email_background,
+                                sede.email,
+                                pdf_bytes,
+                                db_intervento_fresh.numero_relazione,
+                                settings_refreshed.nome_azienda,
+                                data_intervento_email,
+                                azienda_indirizzo,
+                                azienda_telefono,
+                                azienda_email_contatto,
+                                db
+                            )
+                    
+                    email_azienda = settings_refreshed.email_notifiche_scadenze or settings_refreshed.email
+                    if email_azienda:
+                        background_tasks.add_task(
+                            send_email_background,
+                            email_azienda,
+                            pdf_bytes,
+                            db_intervento_fresh.numero_relazione,
+                            settings_refreshed.nome_azienda,
+                            data_intervento_email,
+                            azienda_indirizzo,
+                            azienda_telefono,
+                            azienda_email_contatto,
+                            db
+                        )
+                    
+                    print(f"[CREATE EMAIL PDF] PDF generato e email programmate per RIT {db_intervento_fresh.numero_relazione}")
+            else:
+                # Per interventi normali (non prelievo copie), invia email normalmente
+                # Ricarica l'intervento con tutte le relazioni per generare il PDF corretto
+                db.refresh(db_intervento)
+                # Forza il caricamento delle relazioni
+                _ = db_intervento.dettagli  # Carica dettagli
+                _ = db_intervento.ricambi_utilizzati  # Carica ricambi
+                
+                # Ricarica anche le impostazioni azienda per assicurarsi che siano aggiornate
+                settings_refreshed = get_settings_or_default(db)
+                
+                cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento.cliente_id).first()
+                pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings_refreshed)
+                
+                # Data intervento (usa data_creazione se non c'è data_intervento specifica)
+                data_intervento_email = db_intervento.data_creazione
+                
+                # Dati azienda per footer email
+                azienda_indirizzo = settings_refreshed.indirizzo_completo or ""
+                azienda_telefono = settings_refreshed.telefono or ""
+                azienda_email_contatto = settings_refreshed.email or ""
+                
+                # Email al cliente (se ha email amministrazione)
+                if cliente and cliente.email_amministrazione:
                     background_tasks.add_task(
                         send_email_background,
-                        sede.email,
+                        cliente.email_amministrazione,
                         pdf_bytes,
                         db_intervento.numero_relazione,
-                        settings.nome_azienda,
+                        settings_refreshed.nome_azienda,
                         data_intervento_email,
                         azienda_indirizzo,
                         azienda_telefono,
                         azienda_email_contatto,
                         db
                     )
-            
-            # Email all'azienda (se configurata)
-            # Usa email_notifiche_scadenze se disponibile, altrimenti email principale
-            email_azienda = settings.email_notifiche_scadenze or settings.email
-            if email_azienda:
-                background_tasks.add_task(
-                    send_email_background,
-                    email_azienda,
-                    pdf_bytes,
-                    db_intervento.numero_relazione,
-                    settings.nome_azienda,
-                    data_intervento_email,
-                    azienda_indirizzo,
-                    azienda_telefono,
-                    azienda_email_contatto,
-                    db
-                )
+                
+                # Email alla sede di intervento (se presente e ha email)
+                if db_intervento.sede_id:
+                    sede = db.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento.sede_id).first()
+                    if sede and sede.email:
+                        background_tasks.add_task(
+                            send_email_background,
+                            sede.email,
+                            pdf_bytes,
+                            db_intervento.numero_relazione,
+                            settings_refreshed.nome_azienda,
+                            data_intervento_email,
+                            azienda_indirizzo,
+                            azienda_telefono,
+                            azienda_email_contatto,
+                            db
+                        )
+                
+                # Email all'azienda (se configurata)
+                # Usa email_notifiche_scadenze se disponibile, altrimenti email principale
+                email_azienda = settings_refreshed.email_notifiche_scadenze or settings_refreshed.email
+                if email_azienda:
+                    background_tasks.add_task(
+                        send_email_background,
+                        email_azienda,
+                        pdf_bytes,
+                        db_intervento.numero_relazione,
+                        settings_refreshed.nome_azienda,
+                        data_intervento_email,
+                        azienda_indirizzo,
+                        azienda_telefono,
+                        azienda_email_contatto,
+                        db
+                    )
         except Exception as e:
             print(f"Warning: Errore generazione email: {e}")
             import traceback
@@ -1988,6 +2087,7 @@ def read_intervento(intervento_id: int, db: Session = Depends(database.get_db), 
 def update_intervento(
     intervento_id: int,
     intervento_update: schemas.InterventoCreate,
+    background_tasks: BackgroundTasks,
     request: Request,
     db: Session = Depends(database.get_db),
     current_user: models.Utente = Depends(auth.get_current_active_user)
@@ -2166,6 +2266,127 @@ def update_intervento(
         ip_address=get_client_ip(request)
     )
     
+    # Genera e invia PDF per email se è un prelievo copie con letture copie associate
+    # Questo è necessario perché le letture copie vengono aggiunte durante l'update
+    # IMPORTANTE: Non inviare email durante la creazione iniziale se è un prelievo copie
+    # perché le letture copie non sono ancora disponibili. Invia solo durante l'update.
+    try:
+        # Verifica se ci sono letture copie associate all'intervento
+        letture_copie_count = db.query(models.LetturaCopie).filter(
+            models.LetturaCopie.intervento_id == db_intervento.id
+        ).count()
+        
+        print(f"[UPDATE EMAIL PDF] Verifica prelievo copie: is_prelievo_copie={db_intervento.is_prelievo_copie}, letture_copie_count={letture_copie_count}")
+        
+        # Se è un prelievo copie e ci sono letture copie associate, genera e invia il PDF
+        if db_intervento.is_prelievo_copie and letture_copie_count > 0:
+            print(f"[UPDATE EMAIL PDF] Rilevato prelievo copie con {letture_copie_count} letture copie - Generazione PDF per email")
+            
+            # IMPORTANTE: Ricarica l'intervento DOPO il commit per assicurarsi che tutte le modifiche siano salvate
+            # Non usare db.refresh perché potrebbe non funzionare correttamente dopo il commit
+            # Ricarica completamente l'intervento dalla sessione
+            db_intervento_fresh = db.query(models.Intervento).filter(models.Intervento.id == db_intervento.id).first()
+            if not db_intervento_fresh:
+                print(f"[UPDATE EMAIL PDF] ERRORE: Intervento {db_intervento.id} non trovato dopo il commit!")
+                raise Exception(f"Intervento {db_intervento.id} non trovato")
+            
+            # Forza il caricamento delle relazioni
+            _ = db_intervento_fresh.dettagli  # Carica dettagli
+            _ = db_intervento_fresh.ricambi_utilizzati  # Carica ricambi
+            
+            # Carica letture copie con informazioni asset
+            db_intervento_fresh.letture_copie = db.query(models.LetturaCopie).filter(
+                models.LetturaCopie.intervento_id == db_intervento_fresh.id
+            ).all()
+            
+            print(f"[UPDATE EMAIL PDF] Letture copie caricate dal DB: {len(db_intervento_fresh.letture_copie)}")
+            
+            # Carica informazioni asset per ogni lettura copie
+            for lettura in db_intervento_fresh.letture_copie:
+                if lettura.asset_id:
+                    asset = db.query(models.AssetCliente).filter(models.AssetCliente.id == lettura.asset_id).first()
+                    if asset:
+                        # Aggiungi informazioni asset alla lettura (come attributi temporanei)
+                        lettura.asset_marca = asset.marca or ''
+                        lettura.asset_modello = asset.modello or ''
+                        lettura.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
+                        print(f"[UPDATE EMAIL PDF] Asset caricato per lettura {lettura.id}: {lettura.asset_marca_modello}")
+                    else:
+                        print(f"[UPDATE EMAIL PDF] ATTENZIONE: Asset {lettura.asset_id} non trovato per lettura {lettura.id}")
+                else:
+                    print(f"[UPDATE EMAIL PDF] ATTENZIONE: Lettura {lettura.id} senza asset_id")
+            
+            # Ricarica le impostazioni azienda
+            settings_refreshed = get_settings_or_default(db)
+            
+            # Genera il PDF usando l'intervento ricaricato
+            pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento_fresh, settings_refreshed)
+            
+            # Data intervento
+            data_intervento_email = db_intervento_fresh.data_creazione
+            
+            # Dati azienda per footer email
+            azienda_indirizzo = settings_refreshed.indirizzo_completo or ""
+            azienda_telefono = settings_refreshed.telefono or ""
+            azienda_email_contatto = settings_refreshed.email or ""
+            
+            # Carica cliente
+            cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento_fresh.cliente_id).first()
+            
+            # Email al cliente (se ha email amministrazione)
+            if cliente and cliente.email_amministrazione:
+                background_tasks.add_task(
+                    send_email_background,
+                    cliente.email_amministrazione,
+                    pdf_bytes,
+                    db_intervento_fresh.numero_relazione,
+                    settings_refreshed.nome_azienda,
+                    data_intervento_email,
+                    azienda_indirizzo,
+                    azienda_telefono,
+                    azienda_email_contatto,
+                    db
+                )
+            
+            # Email alla sede di intervento (se presente e ha email)
+            if db_intervento_fresh.sede_id:
+                sede = db.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento_fresh.sede_id).first()
+                if sede and sede.email:
+                    background_tasks.add_task(
+                        send_email_background,
+                        sede.email,
+                        pdf_bytes,
+                        db_intervento_fresh.numero_relazione,
+                        settings_refreshed.nome_azienda,
+                        data_intervento_email,
+                        azienda_indirizzo,
+                        azienda_telefono,
+                        azienda_email_contatto,
+                        db
+                    )
+            
+            # Email all'azienda (se configurata)
+            email_azienda = settings_refreshed.email_notifiche_scadenze or settings_refreshed.email
+            if email_azienda:
+                background_tasks.add_task(
+                    send_email_background,
+                    email_azienda,
+                    pdf_bytes,
+                    db_intervento_fresh.numero_relazione,
+                    settings_refreshed.nome_azienda,
+                    data_intervento_email,
+                    azienda_indirizzo,
+                    azienda_telefono,
+                    azienda_email_contatto,
+                    db
+                )
+            
+            print(f"[UPDATE EMAIL PDF] PDF generato e email programmate per RIT {db_intervento_fresh.numero_relazione}")
+    except Exception as e:
+        print(f"[UPDATE EMAIL PDF] Warning: Errore generazione email durante update: {e}")
+        import traceback
+        traceback.print_exc()
+    
     # Converti per la risposta
     intervento_dict = convert_intervento_time_fields(db_intervento)
     intervento_dict['dettagli'] = [schemas.DettaglioAssetResponse.model_validate(d) for d in db_intervento.dettagli]
@@ -2294,6 +2515,7 @@ def get_ultima_lettura(
 @app.post("/letture-copie/", response_model=schemas.LetturaCopieResponse, tags=["Letture Copie"])
 def create_lettura_copie(
     lettura: schemas.LetturaCopieCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_db),
     current_user: models.Utente = Depends(auth.get_current_active_user)
 ):
@@ -2425,6 +2647,11 @@ def create_lettura_copie(
     else:
         lettura_dict['note'] = note_calcolo
     
+    # Log per debug
+    print(f"[CREATE LETTURA COPIE] Creazione lettura copie per asset {lettura.asset_id}")
+    print(f"[CREATE LETTURA COPIE] intervento_id passato: {lettura.intervento_id}")
+    print(f"[CREATE LETTURA COPIE] contatore_bn: {lettura.contatore_bn}, contatore_colore: {lettura.contatore_colore}")
+    
     db_lettura = models.LetturaCopie(
         **lettura_dict,
         tecnico_id=current_user.id
@@ -2432,6 +2659,196 @@ def create_lettura_copie(
     db.add(db_lettura)
     db.commit()
     db.refresh(db_lettura)
+    
+    # Verifica che l'intervento_id sia stato salvato correttamente
+    print(f"[CREATE LETTURA COPIE] Lettura copie creata con ID: {db_lettura.id}")
+    print(f"[CREATE LETTURA COPIE] intervento_id salvato: {db_lettura.intervento_id}")
+    
+    # Se la lettura copie è associata a un intervento, verifica se è un prelievo copie
+    # e invia l'email dopo un breve delay per permettere la creazione di tutte le letture copie
+    if db_lettura.intervento_id:
+        print(f"[CREATE LETTURA COPIE] Verifica intervento {db_lettura.intervento_id} per invio email")
+        intervento = db.query(models.Intervento).filter(models.Intervento.id == db_lettura.intervento_id).first()
+        if intervento:
+            print(f"[CREATE LETTURA COPIE] Intervento trovato: id={intervento.id}, is_prelievo_copie={intervento.is_prelievo_copie}")
+        else:
+            print(f"[CREATE LETTURA COPIE] ATTENZIONE: Intervento {db_lettura.intervento_id} non trovato!")
+        
+        if intervento and intervento.is_prelievo_copie:
+            print(f"[CREATE LETTURA COPIE] Intervento {intervento.id} è un prelievo copie - Verifica programmazione email")
+            
+            # Usa un meccanismo di debouncing: programma l'email solo se non è già stata programmata
+            # per questo intervento negli ultimi 5 secondi
+            global _interventi_email_programmate
+            
+            # Rimuovi gli interventi più vecchi di 10 secondi dal set
+            import time as time_module
+            current_time = time_module.time()
+            _interventi_email_programmate = {
+                (interv_id, timestamp) for interv_id, timestamp in _interventi_email_programmate
+                if current_time - timestamp < 10
+            }
+            
+            # Verifica se l'email è già stata programmata per questo intervento
+            email_gia_programmata = any(
+                interv_id == db_lettura.intervento_id and (current_time - timestamp) < 5
+                for interv_id, timestamp in _interventi_email_programmate
+            )
+            
+            if email_gia_programmata:
+                print(f"[CREATE LETTURA COPIE] Email già programmata per intervento {db_lettura.intervento_id} - Skip")
+            else:
+                # Aggiungi l'intervento al set
+                _interventi_email_programmate.add((db_lettura.intervento_id, current_time))
+                print(f"[CREATE LETTURA COPIE] Intervento {intervento.id} è un prelievo copie - Programmazione invio email")
+                
+                # Programma l'invio email dopo 3 secondi per permettere la creazione di tutte le letture copie
+                def send_email_after_letture_copie(intervento_id: int):
+                    """Funzione che viene eseguita dopo un delay per inviare l'email"""
+                    print(f"[CREATE LETTURA COPIE EMAIL] Avvio funzione invio email per intervento {intervento_id}")
+                    # Crea una nuova sessione DB per questa operazione asincrona
+                    from .database import SessionLocal
+                    db_email = SessionLocal()
+                    try:
+                        # Attendi 3 secondi per assicurarsi che tutte le letture copie siano state create
+                        import time
+                        print(f"[CREATE LETTURA COPIE EMAIL] Attendo 3 secondi...")
+                        time.sleep(3)
+                        
+                        # Verifica se ci sono altre letture copie create negli ultimi 2 secondi
+                        # Se sì, aspetta ancora un po' per evitare di inviare email multiple
+                        from datetime import timedelta
+                        letture_recenti = db_email.query(models.LetturaCopie).filter(
+                            models.LetturaCopie.intervento_id == intervento_id,
+                            models.LetturaCopie.created_at >= (datetime.now() - timedelta(seconds=2))
+                        ).count()
+                        
+                        if letture_recenti > 0:
+                            # Ci sono letture copie create molto recentemente, aspetta ancora 2 secondi
+                            print(f"[CREATE LETTURA COPIE EMAIL] Trovate {letture_recenti} letture copie recenti, attendo altri 2 secondi...")
+                            time.sleep(2)
+                        
+                        # Rimuovi l'intervento dal set dopo che l'email è stata inviata
+                        global _interventi_email_programmate
+                        _interventi_email_programmate = {
+                            (interv_id, timestamp) for interv_id, timestamp in _interventi_email_programmate
+                            if interv_id != intervento_id
+                        }
+                        
+                        # Ricarica l'intervento
+                        db_intervento_email = db_email.query(models.Intervento).filter(models.Intervento.id == intervento_id).first()
+                        if not db_intervento_email or not db_intervento_email.is_prelievo_copie:
+                            print(f"[CREATE LETTURA COPIE EMAIL] Intervento {intervento_id} non trovato o non è un prelievo copie")
+                            return
+                        
+                        # Verifica se ci sono letture copie associate
+                        letture_copie_count = db_email.query(models.LetturaCopie).filter(
+                            models.LetturaCopie.intervento_id == intervento_id
+                        ).count()
+                        
+                        if letture_copie_count == 0:
+                            print(f"[CREATE LETTURA COPIE EMAIL] Nessuna lettura copie trovata per intervento {intervento_id}")
+                            return
+                        
+                        print(f"[CREATE LETTURA COPIE EMAIL] Trovate {letture_copie_count} letture copie per intervento {intervento_id} - Generazione PDF per email")
+                        
+                        # Forza il caricamento delle relazioni
+                        _ = db_intervento_email.dettagli  # Carica dettagli
+                        _ = db_intervento_email.ricambi_utilizzati  # Carica ricambi
+                        
+                        # Carica tutte le letture copie con informazioni asset
+                        db_intervento_email.letture_copie = db_email.query(models.LetturaCopie).filter(
+                            models.LetturaCopie.intervento_id == intervento_id
+                        ).all()
+                        
+                        print(f"[CREATE LETTURA COPIE EMAIL] Letture copie caricate: {len(db_intervento_email.letture_copie)}")
+                        
+                        # Carica informazioni asset per ogni lettura copie
+                        for lettura_item in db_intervento_email.letture_copie:
+                            if lettura_item.asset_id:
+                                asset = db_email.query(models.AssetCliente).filter(models.AssetCliente.id == lettura_item.asset_id).first()
+                                if asset:
+                                    lettura_item.asset_marca = asset.marca or ''
+                                    lettura_item.asset_modello = asset.modello or ''
+                                    lettura_item.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
+                                    print(f"[CREATE LETTURA COPIE EMAIL] Asset caricato per lettura {lettura_item.id}: {lettura_item.asset_marca_modello}")
+                        
+                        # Ricarica le impostazioni azienda
+                        settings_refreshed = get_settings_or_default(db_email)
+                        
+                        # Genera il PDF usando l'intervento ricaricato
+                        pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento_email, settings_refreshed)
+                        
+                        # Data intervento
+                        data_intervento_email = db_intervento_email.data_creazione
+                        
+                        # Dati azienda per footer email
+                        azienda_indirizzo = settings_refreshed.indirizzo_completo or ""
+                        azienda_telefono = settings_refreshed.telefono or ""
+                        azienda_email_contatto = settings_refreshed.email or ""
+                        
+                        # Carica cliente
+                        cliente = db_email.query(models.Cliente).filter(models.Cliente.id == db_intervento_email.cliente_id).first()
+                        
+                        # Email al cliente (se ha email amministrazione)
+                        if cliente and cliente.email_amministrazione:
+                            send_email_background(
+                                cliente.email_amministrazione,
+                                pdf_bytes,
+                                db_intervento_email.numero_relazione,
+                                settings_refreshed.nome_azienda,
+                                data_intervento_email,
+                                azienda_indirizzo,
+                                azienda_telefono,
+                                azienda_email_contatto,
+                                db_email
+                            )
+                            print(f"[CREATE LETTURA COPIE EMAIL] Email inviata a cliente: {cliente.email_amministrazione}")
+                        
+                        # Email alla sede di intervento (se presente e ha email)
+                        if db_intervento_email.sede_id:
+                            sede = db_email.query(models.SedeCliente).filter(models.SedeCliente.id == db_intervento_email.sede_id).first()
+                            if sede and sede.email:
+                                send_email_background(
+                                    sede.email,
+                                    pdf_bytes,
+                                    db_intervento_email.numero_relazione,
+                                    settings_refreshed.nome_azienda,
+                                    data_intervento_email,
+                                    azienda_indirizzo,
+                                    azienda_telefono,
+                                    azienda_email_contatto,
+                                    db_email
+                                )
+                                print(f"[CREATE LETTURA COPIE EMAIL] Email inviata a sede: {sede.email}")
+                        
+                        # Email all'azienda (se configurata)
+                        email_azienda = settings_refreshed.email_notifiche_scadenze or settings_refreshed.email
+                        if email_azienda:
+                            send_email_background(
+                                email_azienda,
+                                pdf_bytes,
+                                db_intervento_email.numero_relazione,
+                                settings_refreshed.nome_azienda,
+                                data_intervento_email,
+                                azienda_indirizzo,
+                                azienda_telefono,
+                                azienda_email_contatto,
+                                db_email
+                            )
+                            print(f"[CREATE LETTURA COPIE EMAIL] Email inviata ad azienda: {email_azienda}")
+                        
+                        print(f"[CREATE LETTURA COPIE EMAIL] PDF generato e email inviate per RIT {db_intervento_email.numero_relazione}")
+                    except Exception as e:
+                        print(f"[CREATE LETTURA COPIE EMAIL] Warning: Errore generazione email durante creazione lettura copie: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    finally:
+                        db_email.close()
+                
+                # Programma l'invio email dopo 3 secondi
+                background_tasks.add_task(send_email_after_letture_copie, db_lettura.intervento_id)
+    
     return db_lettura
 
 # --- API AUDIT LOG ---
