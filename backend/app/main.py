@@ -1275,6 +1275,144 @@ def get_sedi_cliente(cliente_id: int, db: Session = Depends(database.get_db), cu
         raise HTTPException(status_code=404, detail="Cliente non trovato")
     return db_cliente.sedi
 
+@app.post("/clienti/{cliente_id}/preview-changes", tags=["Clienti"])
+def preview_cliente_changes(
+    cliente_id: int, 
+    cliente: schemas.ClienteCreate, 
+    db: Session = Depends(database.get_db), 
+    current_user: models.Utente = Depends(auth.get_current_active_user)
+):
+    """
+    Calcola le modifiche che verranno applicate all'aggiornamento del cliente.
+    Restituisce un elenco delle modifiche previste per la conferma dell'utente.
+    """
+    db_cliente = db.query(models.Cliente).filter(models.Cliente.id == cliente_id).first()
+    if not db_cliente:
+        raise HTTPException(status_code=404, detail="Cliente non trovato")
+    
+    modifiche = {
+        "cliente": [],
+        "assets_da_aggiornare": [],
+        "assets_da_creare": [],
+        "assets_da_eliminare": [],
+        "assets_protetti": [],  # Asset con letture copie che NON verranno eliminati
+        "sedi_da_aggiornare": [],
+        "sedi_da_creare": [],
+        "sedi_da_eliminare": []
+    }
+    
+    # Calcola modifiche cliente
+    cliente_dict = cliente.model_dump(exclude_unset=True, exclude={"assets_noleggio", "sedi"})
+    for key, value in cliente_dict.items():
+        if hasattr(db_cliente, key):
+            old_value = getattr(db_cliente, key)
+            if old_value != value:
+                modifiche["cliente"].append({
+                    "campo": key,
+                    "valore_precedente": old_value,
+                    "valore_nuovo": value
+                })
+    
+    # Calcola modifiche assets
+    if hasattr(cliente, 'assets_noleggio') and cliente.assets_noleggio is not None and len(cliente.assets_noleggio) > 0:
+        assets_esistenti = {a.id: a for a in db.query(models.AssetCliente).filter(models.AssetCliente.cliente_id == cliente_id).all()}
+        assets_con_letture_copie = set()
+        
+        for asset_id in assets_esistenti.keys():
+            letture_count = db.query(models.LetturaCopie).filter(models.LetturaCopie.asset_id == asset_id).count()
+            if letture_count > 0:
+                assets_con_letture_copie.add(asset_id)
+        
+        assets_processati_ids = set()
+        
+        for asset in cliente.assets_noleggio:
+            asset_dict = asset.model_dump() if hasattr(asset, 'model_dump') else asset
+            asset_id = asset_dict.get('id')
+            
+            # Cerca asset esistente
+            db_asset = None
+            if asset_id and asset_id in assets_esistenti:
+                db_asset = assets_esistenti[asset_id]
+                assets_processati_ids.add(asset_id)
+            else:
+                # Cerca per marca/modello/matricola
+                marca = (asset_dict.get('marca') or '').strip()
+                modello = (asset_dict.get('modello') or '').strip()
+                matricola = (asset_dict.get('matricola') or '').strip()
+                seriale = (asset_dict.get('seriale') or '').strip()
+                tipo_asset = asset_dict.get('tipo_asset')
+                
+                for existing_id, existing_asset in assets_esistenti.items():
+                    if existing_id in assets_processati_ids:
+                        continue
+                    if existing_asset.tipo_asset != tipo_asset:
+                        continue
+                    if (existing_asset.marca or '').strip().lower() != marca.lower() or (existing_asset.modello or '').strip().lower() != modello.lower():
+                        continue
+                    
+                    if tipo_asset == "Printing":
+                        existing_matricola = (existing_asset.matricola or '').strip()
+                        if (matricola and existing_matricola and matricola.lower() == existing_matricola.lower()) or (not matricola and not existing_matricola):
+                            db_asset = existing_asset
+                            assets_processati_ids.add(existing_id)
+                            break
+                    elif tipo_asset == "IT":
+                        existing_seriale = (existing_asset.seriale or '').strip()
+                        if (seriale and existing_seriale and seriale.lower() == existing_seriale.lower()) or (not seriale and not existing_seriale):
+                            db_asset = existing_asset
+                            assets_processati_ids.add(existing_id)
+                            break
+            
+            if db_asset:
+                # Asset da aggiornare
+                asset_modifiche = []
+                for key, value in asset_dict.items():
+                    if key != 'id' and hasattr(db_asset, key):
+                        old_value = getattr(db_asset, key)
+                        # Ignora contatori iniziali se non specificati esplicitamente
+                        if key in ['contatore_iniziale_bn', 'contatore_iniziale_colore'] and (value is None or value == 0):
+                            continue
+                        if old_value != value:
+                            asset_modifiche.append({
+                                "campo": key,
+                                "valore_precedente": old_value,
+                                "valore_nuovo": value
+                            })
+                
+                if asset_modifiche:
+                    modifiche["assets_da_aggiornare"].append({
+                        "id": db_asset.id,
+                        "nome": f"{db_asset.marca or ''} {db_asset.modello or ''} {db_asset.matricola or db_asset.seriale or ''}".strip(),
+                        "modifiche": asset_modifiche,
+                        "ha_letture_copie": db_asset.id in assets_con_letture_copie
+                    })
+            else:
+                # Nuovo asset da creare
+                modifiche["assets_da_creare"].append({
+                    "nome": f"{asset_dict.get('marca') or ''} {asset_dict.get('modello') or ''} {asset_dict.get('matricola') or asset_dict.get('seriale') or ''}".strip()
+                })
+        
+        # Asset da eliminare
+        for asset_id, asset in assets_esistenti.items():
+            if asset_id not in assets_processati_ids:
+                if asset_id in assets_con_letture_copie:
+                    # Asset protetto (ha letture copie)
+                    letture_count = db.query(models.LetturaCopie).filter(models.LetturaCopie.asset_id == asset_id).count()
+                    modifiche["assets_protetti"].append({
+                        "id": asset.id,
+                        "nome": f"{asset.marca or ''} {asset.modello or ''} {asset.matricola or asset.seriale or ''}".strip(),
+                        "letture_copie_count": letture_count,
+                        "motivo": f"Ha {letture_count} letture copie associate - NON verrà eliminato per preservare i dati storici"
+                    })
+                else:
+                    # Asset da eliminare
+                    modifiche["assets_da_eliminare"].append({
+                        "id": asset.id,
+                        "nome": f"{asset.marca or ''} {asset.modello or ''} {asset.matricola or asset.seriale or ''}".strip()
+                    })
+    
+    return modifiche
+
 @app.put("/clienti/{cliente_id}", response_model=schemas.ClienteResponse, tags=["Clienti"])
 def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Request, db: Session = Depends(database.get_db), current_user: models.Utente = Depends(auth.get_current_active_user)):
     """Aggiorna un cliente e le sue sedi"""
@@ -1327,6 +1465,7 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Req
                     assets_con_letture_copie.add(asset_id)
             
             # Processa gli asset nuovi/aggiornati
+            # IMPORTANTE: Usa anche marca/modello/matricola per identificare asset esistenti per evitare duplicazioni
             assets_processati_ids = set()
             for asset in cliente.assets_noleggio:
                 asset_dict = asset.model_dump() if hasattr(asset, 'model_dump') else asset
@@ -1342,11 +1481,75 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Req
                 if sede_id and sede_id != 0 and sede_id != '0':
                     sedi_referenziate_da_nuovi_assets.add(int(sede_id))
                 
+                db_asset = None
+                asset_trovato_per_id = False
+                
+                # Prima prova a trovare per ID
                 if asset_id and asset_id in assets_esistenti:
-                    # Aggiorna asset esistente - PRESERVA i contatori iniziali se non vengono modificati esplicitamente
                     db_asset = assets_esistenti[asset_id]
                     assets_processati_ids.add(asset_id)
+                    asset_trovato_per_id = True
+                else:
+                    # Se non trovato per ID, cerca per marca/modello/matricola (per evitare duplicazioni)
+                    marca = (asset_dict.get('marca') or '').strip()
+                    modello = (asset_dict.get('modello') or '').strip()
+                    matricola = (asset_dict.get('matricola') or '').strip()
+                    seriale = (asset_dict.get('seriale') or '').strip()
+                    tipo_asset = asset_dict.get('tipo_asset')
                     
+                    # Cerca asset esistente con stesso tipo, marca, modello e matricola/seriale
+                    for existing_id, existing_asset in assets_esistenti.items():
+                        if existing_id in assets_processati_ids:
+                            continue  # Già processato
+                        
+                        # Confronta tipo asset
+                        if existing_asset.tipo_asset != tipo_asset:
+                            continue
+                        
+                        # Confronta marca e modello
+                        existing_marca = (existing_asset.marca or '').strip()
+                        existing_modello = (existing_asset.modello or '').strip()
+                        
+                        if marca.lower() != existing_marca.lower() or modello.lower() != existing_modello.lower():
+                            continue
+                        
+                        # Per Printing: confronta matricola
+                        if tipo_asset == "Printing":
+                            existing_matricola = (existing_asset.matricola or '').strip()
+                            if matricola and existing_matricola:
+                                if matricola.lower() == existing_matricola.lower():
+                                    db_asset = existing_asset
+                                    assets_processati_ids.add(existing_id)
+                                    asset_trovato_per_id = True
+                                    print(f"[UPDATE CLIENTE] Asset trovato per marca/modello/matricola: {marca} {modello} {matricola} (ID: {existing_id})")
+                                    break
+                            elif not matricola and not existing_matricola:
+                                # Entrambi senza matricola, considera match se marca/modello corrispondono
+                                db_asset = existing_asset
+                                assets_processati_ids.add(existing_id)
+                                asset_trovato_per_id = True
+                                print(f"[UPDATE CLIENTE] Asset trovato per marca/modello (senza matricola): {marca} {modello} (ID: {existing_id})")
+                                break
+                        # Per IT: confronta seriale
+                        elif tipo_asset == "IT":
+                            existing_seriale = (existing_asset.seriale or '').strip()
+                            if seriale and existing_seriale:
+                                if seriale.lower() == existing_seriale.lower():
+                                    db_asset = existing_asset
+                                    assets_processati_ids.add(existing_id)
+                                    asset_trovato_per_id = True
+                                    print(f"[UPDATE CLIENTE] Asset trovato per marca/modello/seriale: {marca} {modello} {seriale} (ID: {existing_id})")
+                                    break
+                            elif not seriale and not existing_seriale:
+                                # Entrambi senza seriale, considera match se marca/modello corrispondono
+                                db_asset = existing_asset
+                                assets_processati_ids.add(existing_id)
+                                asset_trovato_per_id = True
+                                print(f"[UPDATE CLIENTE] Asset trovato per marca/modello (senza seriale): {marca} {modello} (ID: {existing_id})")
+                                break
+                
+                if db_asset:
+                    # Aggiorna asset esistente - PRESERVA i contatori iniziali e le letture copie
                     # Salva i contatori iniziali esistenti prima dell'aggiornamento
                     contatore_bn_originale = db_asset.contatore_iniziale_bn
                     contatore_colore_originale = db_asset.contatore_iniziale_colore
@@ -1370,10 +1573,11 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Req
                     if 'contatore_iniziale_colore' not in asset_dict or asset_dict.get('contatore_iniziale_colore') is None or asset_dict.get('contatore_iniziale_colore') == 0:
                         db_asset.contatore_iniziale_colore = contatore_colore_originale
                 else:
-                    # Crea nuovo asset (senza ID o con ID non esistente)
+                    # Crea nuovo asset solo se non trovato né per ID né per marca/modello/matricola
                     asset_dict.pop('id', None)  # Rimuovi ID se presente ma non valido
                     db_asset = models.AssetCliente(**asset_dict, cliente_id=db_cliente.id)
                     db.add(db_asset)
+                    print(f"[UPDATE CLIENTE] Nuovo asset creato: {asset_dict.get('marca')} {asset_dict.get('modello')} {asset_dict.get('matricola') or asset_dict.get('seriale')}")
             
             # Elimina solo gli asset che non sono più nella lista E non hanno letture copie associate
             for asset_id, asset in assets_esistenti.items():

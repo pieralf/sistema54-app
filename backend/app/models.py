@@ -222,7 +222,7 @@ class MovimentoRicambio(Base):
 class LetturaCopie(Base):
     __tablename__ = "letture_copie"
     id = Column(Integer, primary_key=True, index=True)
-    asset_id = Column(Integer, ForeignKey("assets_cliente.id", ondelete="CASCADE"), nullable=False)
+    asset_id = Column(Integer, ForeignKey("assets_cliente.id", ondelete="RESTRICT"), nullable=False)
     intervento_id = Column(Integer, ForeignKey("interventi.id", ondelete="SET NULL"), nullable=True)
     data_lettura = Column(DateTime, nullable=False, default=datetime.now)
     contatore_bn = Column(Integer, nullable=False, default=0)
