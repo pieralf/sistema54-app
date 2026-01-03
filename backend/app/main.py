@@ -1311,19 +1311,23 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Req
             setattr(db_cliente, key, value)
         
         # PRIMA: Gestione assets (devono essere gestiti prima delle sedi per evitare violazioni FK)
+        # IMPORTANTE: Non eliminare gli asset esistenti per preservare contatori iniziali e letture copie
         # Ottieni gli ID delle sedi che saranno referenziate dai nuovi assets
         sedi_referenziate_da_nuovi_assets = set()
-        if hasattr(cliente, 'assets_noleggio') and cliente.assets_noleggio is not None and len(cliente.assets_noleggio) > 0:
-            for asset in cliente.assets_noleggio:
-                asset_dict = asset.model_dump() if hasattr(asset, 'model_dump') else asset
-                sede_id = asset_dict.get('sede_id')
-                if sede_id and sede_id != 0 and sede_id != '0':
-                    sedi_referenziate_da_nuovi_assets.add(int(sede_id))
         
-        # Elimina tutti gli assets esistenti per questo cliente (prima di gestire le sedi)
         if hasattr(cliente, 'assets_noleggio') and cliente.assets_noleggio is not None and len(cliente.assets_noleggio) > 0:
-            db.query(models.AssetCliente).filter(models.AssetCliente.cliente_id == cliente_id).delete()
-            # Crea i nuovi assets
+            # Carica gli asset esistenti per questo cliente
+            assets_esistenti = {a.id: a for a in db.query(models.AssetCliente).filter(models.AssetCliente.cliente_id == cliente_id).all()}
+            
+            # Ottieni gli ID degli asset che hanno letture copie associate (non possono essere eliminati)
+            assets_con_letture_copie = set()
+            for asset_id in assets_esistenti.keys():
+                letture_count = db.query(models.LetturaCopie).filter(models.LetturaCopie.asset_id == asset_id).count()
+                if letture_count > 0:
+                    assets_con_letture_copie.add(asset_id)
+            
+            # Processa gli asset nuovi/aggiornati
+            assets_processati_ids = set()
             for asset in cliente.assets_noleggio:
                 asset_dict = asset.model_dump() if hasattr(asset, 'model_dump') else asset
                 # Rimuovi eventuali campi non presenti nel modello
@@ -1332,11 +1336,61 @@ def update_cliente(cliente_id: int, cliente: schemas.ClienteCreate, request: Req
                 # Assicurati che sede_id sia null se 0 o non valido
                 if asset_dict.get('sede_id') == 0 or asset_dict.get('sede_id') == '0':
                     asset_dict['sede_id'] = None
-                db_asset = models.AssetCliente(**asset_dict, cliente_id=db_cliente.id)
-                db.add(db_asset)
+                
+                asset_id = asset_dict.get('id')
+                sede_id = asset_dict.get('sede_id')
+                if sede_id and sede_id != 0 and sede_id != '0':
+                    sedi_referenziate_da_nuovi_assets.add(int(sede_id))
+                
+                if asset_id and asset_id in assets_esistenti:
+                    # Aggiorna asset esistente - PRESERVA i contatori iniziali se non vengono modificati esplicitamente
+                    db_asset = assets_esistenti[asset_id]
+                    assets_processati_ids.add(asset_id)
+                    
+                    # Salva i contatori iniziali esistenti prima dell'aggiornamento
+                    contatore_bn_originale = db_asset.contatore_iniziale_bn
+                    contatore_colore_originale = db_asset.contatore_iniziale_colore
+                    
+                    # Aggiorna tutti i campi tranne i contatori iniziali (se non specificati esplicitamente)
+                    for key, value in asset_dict.items():
+                        if key != 'id' and hasattr(db_asset, key):
+                            # Se il campo è un contatore iniziale e il valore è 0 o None, preserva il valore esistente
+                            if key == 'contatore_iniziale_bn' and (value is None or value == 0):
+                                # Preserva il valore esistente se non viene specificato esplicitamente
+                                continue
+                            elif key == 'contatore_iniziale_colore' and (value is None or value == 0):
+                                # Preserva il valore esistente se non viene specificato esplicitamente
+                                continue
+                            else:
+                                setattr(db_asset, key, value)
+                    
+                    # Se i contatori iniziali non sono stati specificati nel payload, preservali
+                    if 'contatore_iniziale_bn' not in asset_dict or asset_dict.get('contatore_iniziale_bn') is None or asset_dict.get('contatore_iniziale_bn') == 0:
+                        db_asset.contatore_iniziale_bn = contatore_bn_originale
+                    if 'contatore_iniziale_colore' not in asset_dict or asset_dict.get('contatore_iniziale_colore') is None or asset_dict.get('contatore_iniziale_colore') == 0:
+                        db_asset.contatore_iniziale_colore = contatore_colore_originale
+                else:
+                    # Crea nuovo asset (senza ID o con ID non esistente)
+                    asset_dict.pop('id', None)  # Rimuovi ID se presente ma non valido
+                    db_asset = models.AssetCliente(**asset_dict, cliente_id=db_cliente.id)
+                    db.add(db_asset)
+            
+            # Elimina solo gli asset che non sono più nella lista E non hanno letture copie associate
+            for asset_id, asset in assets_esistenti.items():
+                if asset_id not in assets_processati_ids and asset_id not in assets_con_letture_copie:
+                    # L'asset non è più nella lista e non ha letture copie, può essere eliminato
+                    db.delete(asset)
         elif not hasattr(cliente, 'assets_noleggio') or not cliente.has_noleggio or (hasattr(cliente, 'assets_noleggio') and (cliente.assets_noleggio is None or len(cliente.assets_noleggio) == 0)):
-            # Se noleggio è disabilitato o non ci sono assets, elimina tutti gli assets
-            db.query(models.AssetCliente).filter(models.AssetCliente.cliente_id == cliente_id).delete()
+            # Se noleggio è disabilitato o non ci sono assets, elimina solo quelli senza letture copie
+            assets_esistenti = db.query(models.AssetCliente).filter(models.AssetCliente.cliente_id == cliente_id).all()
+            for asset in assets_esistenti:
+                letture_count = db.query(models.LetturaCopie).filter(models.LetturaCopie.asset_id == asset.id).count()
+                if letture_count == 0:
+                    # Nessuna lettura copie associata, può essere eliminato
+                    db.delete(asset)
+                else:
+                    # Ha letture copie associate, NON eliminare (preserva i dati storici)
+                    print(f"[UPDATE CLIENTE] Asset {asset.id} ({asset.marca} {asset.modello}) ha {letture_count} letture copie associate - NON eliminato")
         
         # POI: Gestione sedi (ora che gli assets sono stati gestiti)
         # Gestione sede legale operativa
