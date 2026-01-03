@@ -497,6 +497,11 @@ export default function NuovoClientePage() {
     setError('');
 
     try {
+      // IMPORTANTE: Carica prima i dati attuali del cliente dal backend per garantire
+      // che tutti i campi obbligatori siano presenti nel payload
+      const clienteRes = await axios.get(`${getApiUrl()}/clienti/${id}`);
+      const clienteAttuale = clienteRes.data;
+      
       // Ottieni i valori attuali del form
       const formValues = watch();
       
@@ -559,49 +564,60 @@ export default function NuovoClientePage() {
         ? `${formValues.indirizzo || ''}, ${formValues.numero_civico}`.trim()
         : (formValues.indirizzo || '');
       
-      // Costruisci il payload in base alla sezione da salvare
-      let payload: any = {};
+      // Costruisci il payload partendo dai dati attuali del cliente e sovrascrivendo solo i campi modificati
+      // Questo garantisce che tutti i campi obbligatori siano presenti
+      let payload: any = {
+        // Campi obbligatori sempre presenti (dal cliente attuale o dal form)
+        ragione_sociale: formValues.ragione_sociale || clienteAttuale.ragione_sociale || '',
+        indirizzo: indirizzoCompleto || clienteAttuale.indirizzo || '',
+        citta: formValues.citta || clienteAttuale.citta || '',
+        cap: formValues.cap || clienteAttuale.cap || '',
+        p_iva: formValues.p_iva || clienteAttuale.p_iva || '',
+        codice_fiscale: formValues.codice_fiscale || clienteAttuale.codice_fiscale || '',
+        email_amministrazione: formValues.email_amministrazione || clienteAttuale.email_amministrazione || '',
+        // Campi configurazione (sovrascritti se modificati)
+        is_pa: Boolean(formValues.is_pa !== undefined ? formValues.is_pa : clienteAttuale.is_pa),
+        codice_sdi: formValues.codice_sdi !== undefined ? formValues.codice_sdi : (clienteAttuale.codice_sdi || ''),
+        has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza !== undefined ? formValues.has_contratto_assistenza : clienteAttuale.has_contratto_assistenza),
+        has_noleggio: Boolean(formValues.has_noleggio !== undefined ? formValues.has_noleggio : clienteAttuale.has_noleggio),
+        has_multisede: Boolean(formValues.has_multisede !== undefined ? formValues.has_multisede : clienteAttuale.has_multisede),
+        sede_legale_operativa: Boolean(formValues.sede_legale_operativa !== undefined ? formValues.sede_legale_operativa : clienteAttuale.sede_legale_operativa),
+        // Sedi e assets sempre inclusi (potrebbero essere modificati)
+        sedi: hasMultisede ? sedi : (clienteAttuale.sedi || []),
+        assets_noleggio: assetsToSend.length > 0 ? assetsToSend : (clienteAttuale.assets_noleggio || [])
+      };
       
+      // Sovrascrivi solo i campi specifici della sezione da salvare
       if (section === 'anagrafica') {
-        // Solo dati anagrafici
-        payload = {
-          ragione_sociale: formValues.ragione_sociale || '',
-          indirizzo: indirizzoCompleto,
-          citta: formValues.citta || '',
-          cap: formValues.cap || '',
-          p_iva: formValues.p_iva || '',
-          codice_fiscale: formValues.codice_fiscale || '',
-          email_amministrazione: formValues.email_amministrazione || '',
-          is_pa: Boolean(formValues.is_pa),
-          codice_sdi: formValues.codice_sdi || '',
-          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
-          has_noleggio: Boolean(formValues.has_noleggio),
-          has_multisede: Boolean(formValues.has_multisede),
-          sede_legale_operativa: Boolean(formValues.sede_legale_operativa),
-          sedi: hasMultisede ? sedi : [],
-          assets_noleggio: assetsToSend
-        };
+        // Aggiorna solo i dati anagrafici
+        payload.ragione_sociale = formValues.ragione_sociale || '';
+        payload.indirizzo = indirizzoCompleto;
+        payload.citta = formValues.citta || '';
+        payload.cap = formValues.cap || '';
+        payload.p_iva = formValues.p_iva || '';
+        payload.codice_fiscale = formValues.codice_fiscale || '';
+        payload.email_amministrazione = formValues.email_amministrazione || '';
+        payload.is_pa = Boolean(formValues.is_pa);
+        payload.codice_sdi = formValues.codice_sdi || '';
+        payload.sedi = hasMultisede ? sedi : [];
+        payload.assets_noleggio = assetsToSend;
       } else if (section === 'configurazioni') {
-        // Solo configurazioni
-        payload = {
-          is_pa: Boolean(formValues.is_pa),
-          codice_sdi: formValues.codice_sdi || '',
-          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
-          has_noleggio: Boolean(formValues.has_noleggio),
-          has_multisede: Boolean(formValues.has_multisede),
-          sede_legale_operativa: Boolean(formValues.sede_legale_operativa),
-          sedi: hasMultisede ? sedi : [],
-          assets_noleggio: assetsToSend
-        };
+        // Aggiorna solo le configurazioni (mantieni i dati anagrafici esistenti)
+        payload.is_pa = Boolean(formValues.is_pa);
+        payload.codice_sdi = formValues.codice_sdi || '';
+        payload.has_contratto_assistenza = Boolean(formValues.has_contratto_assistenza);
+        payload.has_noleggio = Boolean(formValues.has_noleggio);
+        payload.has_multisede = Boolean(formValues.has_multisede);
+        payload.sede_legale_operativa = Boolean(formValues.sede_legale_operativa);
+        payload.sedi = hasMultisede ? sedi : [];
+        payload.assets_noleggio = assetsToSend;
       } else if (section === 'contratto') {
-        // Solo dettagli contratto assistenza
-        payload = {
-          has_contratto_assistenza: Boolean(formValues.has_contratto_assistenza),
-          data_inizio_contratto_assistenza: formValues.data_inizio_contratto_assistenza || null,
-          data_fine_contratto_assistenza: formValues.data_fine_contratto_assistenza || null,
-          limite_chiamate_contratto: formValues.limite_chiamate_contratto || null,
-          costo_chiamata_fuori_limite: formValues.costo_chiamata_fuori_limite || null
-        };
+        // Aggiorna solo i dettagli contratto assistenza (mantieni tutto il resto)
+        payload.has_contratto_assistenza = Boolean(formValues.has_contratto_assistenza);
+        payload.data_inizio_contratto_assistenza = formValues.data_inizio_contratto_assistenza || null;
+        payload.data_fine_contratto_assistenza = formValues.data_fine_contratto_assistenza || null;
+        payload.limite_chiamate_contratto = formValues.limite_chiamate_contratto || null;
+        payload.costo_chiamata_fuori_limite = formValues.costo_chiamata_fuori_limite || null;
       }
       
       console.log(`[Salvataggio sezione ${section}] Payload:`, JSON.stringify(payload, null, 2));
@@ -609,8 +625,8 @@ export default function NuovoClientePage() {
       await axios.put(`${getApiUrl()}/clienti/${id}`, payload);
       alert(`Sezione "${section === 'anagrafica' ? 'Dati Anagrafici' : section === 'configurazioni' ? 'Configurazioni' : 'Contratto Assistenza'}" salvata con successo!`);
       
-      // Ricarica i dati del cliente per aggiornare il form
-      await loadCliente();
+      // NON ricaricare i dati per evitare loop - i valori del form sono già aggiornati
+      // Se necessario, aggiorna solo i valori specifici della sezione salvata
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Errore durante il salvataggio';
       setError(msg);
