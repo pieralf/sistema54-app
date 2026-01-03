@@ -53,7 +53,8 @@ class Cliente(Base):
     cap = Column(String)
     p_iva = Column(String, nullable=True) 
     codice_fiscale = Column(String, nullable=True)
-    email_amministrazione = Column(String, nullable=True) 
+    email_amministrazione = Column(String, nullable=True)  # Email amministrazione generale
+    email_pec = Column(String, nullable=True)  # PEC (Posta Elettronica Certificata) per PA
     
     # Fatturazione Elettronica / PA
     codice_sdi = Column(String, nullable=True)

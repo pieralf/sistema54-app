@@ -60,7 +60,8 @@ class ClienteBase(BaseModel):
     cap: Optional[str] = None
     p_iva: Optional[str] = None
     codice_fiscale: Optional[str] = None
-    email_amministrazione: Optional[str] = None
+    email_amministrazione: Optional[str] = None  # Email amministrazione generale
+    email_pec: Optional[str] = None  # PEC (Posta Elettronica Certificata) per PA
     codice_sdi: Optional[str] = ""
     is_pa: Optional[bool] = False
     has_contratto_assistenza: Optional[bool] = False

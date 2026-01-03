@@ -52,6 +52,7 @@ export default function NuovoClientePage() {
       p_iva: '',
       codice_fiscale: '',
       email_amministrazione: '',
+      email_pec: '',
       is_pa: false,
       codice_sdi: '',
       has_contratto_assistenza: false,
@@ -99,6 +100,7 @@ export default function NuovoClientePage() {
         setValue('p_iva', cliente.p_iva || '');
         setValue('codice_fiscale', cliente.codice_fiscale || '');
         setValue('email_amministrazione', cliente.email_amministrazione || '');
+        setValue('email_pec', cliente.email_pec || '');
         setValue('is_pa', cliente.is_pa || false);
         setValue('codice_sdi', cliente.codice_sdi || '');
         setValue('has_contratto_assistenza', cliente.has_contratto_assistenza || false);
@@ -566,15 +568,18 @@ export default function NuovoClientePage() {
       
       // Costruisci il payload partendo dai dati attuali del cliente e sovrascrivendo solo i campi modificati
       // Questo garantisce che tutti i campi obbligatori siano presenti
+      // IMPORTANTE: Usa sempre i valori dal form (formValues) per i campi anagrafici per preservare le modifiche non salvate
       let payload: any = {
-        // Campi obbligatori sempre presenti (dal cliente attuale o dal form)
+        // Campi obbligatori sempre presenti (dal form per preservare modifiche non salvate, altrimenti dal cliente attuale)
         ragione_sociale: formValues.ragione_sociale || clienteAttuale.ragione_sociale || '',
         indirizzo: indirizzoCompleto || clienteAttuale.indirizzo || '',
         citta: formValues.citta || clienteAttuale.citta || '',
         cap: formValues.cap || clienteAttuale.cap || '',
         p_iva: formValues.p_iva || clienteAttuale.p_iva || '',
         codice_fiscale: formValues.codice_fiscale || clienteAttuale.codice_fiscale || '',
-        email_amministrazione: formValues.email_amministrazione || clienteAttuale.email_amministrazione || '',
+        // IMPORTANTE: Usa sempre email_amministrazione dal form per preservare le modifiche fatte nella sezione anagrafica
+        email_amministrazione: formValues.email_amministrazione !== undefined ? formValues.email_amministrazione : (clienteAttuale.email_amministrazione || ''),
+        email_pec: formValues.email_pec !== undefined ? formValues.email_pec : (clienteAttuale.email_pec || ''),
         // Campi configurazione (sovrascritti se modificati)
         is_pa: Boolean(formValues.is_pa !== undefined ? formValues.is_pa : clienteAttuale.is_pa),
         codice_sdi: formValues.codice_sdi !== undefined ? formValues.codice_sdi : (clienteAttuale.codice_sdi || ''),
@@ -597,12 +602,16 @@ export default function NuovoClientePage() {
         payload.p_iva = formValues.p_iva || '';
         payload.codice_fiscale = formValues.codice_fiscale || '';
         payload.email_amministrazione = formValues.email_amministrazione || '';
+        payload.email_pec = formValues.email_pec || '';
         payload.is_pa = Boolean(formValues.is_pa);
         payload.codice_sdi = formValues.codice_sdi || '';
         payload.sedi = hasMultisede ? sedi : [];
         payload.assets_noleggio = assetsToSend;
       } else if (section === 'configurazioni') {
-        // Aggiorna solo le configurazioni (mantieni i dati anagrafici esistenti)
+        // Aggiorna solo le configurazioni (mantieni i dati anagrafici esistenti dal form)
+        // IMPORTANTE: Mantieni email_amministrazione e email_pec dal form per preservare le modifiche fatte nella sezione anagrafica
+        payload.email_amministrazione = formValues.email_amministrazione !== undefined ? formValues.email_amministrazione : (clienteAttuale.email_amministrazione || '');
+        payload.email_pec = formValues.email_pec !== undefined ? formValues.email_pec : (clienteAttuale.email_pec || '');
         payload.is_pa = Boolean(formValues.is_pa);
         payload.codice_sdi = formValues.codice_sdi || '';
         payload.has_contratto_assistenza = Boolean(formValues.has_contratto_assistenza);
@@ -868,7 +877,7 @@ export default function NuovoClientePage() {
               {isPa && (
                 <div className="grid grid-cols-2 gap-3 mt-3 animate-in fade-in">
                   <IOSInput label="Codice SDI" {...register('codice_sdi')} />
-                  <IOSInput label="PEC" {...register('email_amministrazione')} />
+                  <IOSInput label="PEC" type="email" {...register('email_pec')} />
                 </div>
               )}
             </div>

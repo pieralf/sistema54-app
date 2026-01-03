@@ -98,7 +98,7 @@ const NewClientModal = ({ isOpen, onClose, onClientCreated }: any) => {
                         {isPa && (
                             <div className="grid grid-cols-2 gap-3 animate-in fade-in">
                                 <IOSInput label="Codice SDI" {...register("codice_sdi")} />
-                                <IOSInput label="PEC" {...register("email_amministrazione")} />
+                                <IOSInput label="PEC" type="email" {...register("email_pec")} />
                             </div>
                         )}
                     </div>
