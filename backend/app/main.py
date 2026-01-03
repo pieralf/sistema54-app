@@ -1799,8 +1799,35 @@ def create_intervento(
 
         # 6. Invio Email (Gestito fuori dalla transazione DB)
         try:
+            # Ricarica l'intervento con tutte le relazioni per generare il PDF corretto
+            # Questo è necessario perché dopo il commit le relazioni potrebbero non essere ancora disponibili
+            db.refresh(db_intervento)
+            # Forza il caricamento delle relazioni
+            _ = db_intervento.dettagli  # Carica dettagli
+            _ = db_intervento.ricambi_utilizzati  # Carica ricambi
+            
+            # Carica letture copie con informazioni asset se è un prelievo copie
+            if db_intervento.is_prelievo_copie:
+                db_intervento.letture_copie = db.query(models.LetturaCopie).filter(
+                    models.LetturaCopie.intervento_id == db_intervento.id
+                ).all()
+                
+                # Carica informazioni asset per ogni lettura copie
+                for lettura in db_intervento.letture_copie:
+                    if lettura.asset_id:
+                        asset = db.query(models.AssetCliente).filter(models.AssetCliente.id == lettura.asset_id).first()
+                        if asset:
+                            # Aggiungi informazioni asset alla lettura (come attributi temporanei)
+                            lettura.asset_marca = asset.marca or ''
+                            lettura.asset_modello = asset.modello or ''
+                            lettura.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
+            
+            # Ricarica anche le impostazioni azienda per assicurarsi che siano aggiornate
+            # e che contengano tutti i dati necessari per l'intestazione del PDF
+            settings_refreshed = get_settings_or_default(db)
+            
             cliente = db.query(models.Cliente).filter(models.Cliente.id == db_intervento.cliente_id).first()
-            pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings)
+            pdf_bytes = pdf_service.genera_pdf_intervento(db_intervento, settings_refreshed)
             
             # Data intervento (usa data_creazione se non c'è data_intervento specifica)
             data_intervento_email = db_intervento.data_creazione
@@ -2152,11 +2179,21 @@ def download_pdf_rit(intervento_id: int, db: Session = Depends(database.get_db),
     rit = db.query(models.Intervento).filter(models.Intervento.id == intervento_id).first()
     if not rit: raise HTTPException(status_code=404, detail="Not found")
     
-    # Carica le letture copie associate all'intervento
+    # Carica le letture copie associate all'intervento con informazioni asset
     if rit.is_prelievo_copie:
         rit.letture_copie = db.query(models.LetturaCopie).filter(
             models.LetturaCopie.intervento_id == intervento_id
         ).all()
+        
+        # Carica informazioni asset per ogni lettura copie
+        for lettura in rit.letture_copie:
+            if lettura.asset_id:
+                asset = db.query(models.AssetCliente).filter(models.AssetCliente.id == lettura.asset_id).first()
+                if asset:
+                    # Aggiungi informazioni asset alla lettura (come attributi temporanei)
+                    lettura.asset_marca = asset.marca or ''
+                    lettura.asset_modello = asset.modello or ''
+                    lettura.asset_marca_modello = f"{asset.marca or ''} {asset.modello or ''}".strip() or 'N/A'
     
     azienda = get_settings_or_default(db)
     

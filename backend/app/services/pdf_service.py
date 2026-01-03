@@ -155,7 +155,18 @@ def genera_pdf_intervento(intervento, azienda_settings) -> bytes:
         try:
             safe_azienda = azienda_settings.model_dump() 
         except:
-            safe_azienda = azienda_settings.__dict__ if hasattr(azienda_settings, '__dict__') else {}
+            # Se è un oggetto SQLAlchemy, convertilo manualmente in dizionario
+            if hasattr(azienda_settings, '__table__'):
+                # È un modello SQLAlchemy, estrai tutti i campi
+                safe_azienda = {}
+                for column in azienda_settings.__table__.columns:
+                    value = getattr(azienda_settings, column.name, None)
+                    safe_azienda[column.name] = value
+            elif hasattr(azienda_settings, '__dict__'):
+                # Oggetto Python normale
+                safe_azienda = {k: v for k, v in azienda_settings.__dict__.items() if not k.startswith('_')}
+            else:
+                safe_azienda = {}
 
     # 2. Calcoli per il PDF
     # Normalizza ora_inizio e ora_fine (gestisci stringhe)
@@ -218,6 +229,15 @@ def genera_pdf_intervento(intervento, azienda_settings) -> bytes:
     if HAS_WEASYPRINT:
         try:
             print(f"Generazione PDF con WeasyPrint per RIT: {intervento.numero_relazione}")
+            # Debug: verifica che i dati azienda siano presenti
+            print(f"[PDF DEBUG] Dati azienda per RIT {intervento.numero_relazione}:")
+            print(f"  - nome_azienda: {safe_azienda.get('nome_azienda', 'NON PRESENTE')}")
+            print(f"  - indirizzo_completo: {safe_azienda.get('indirizzo_completo', 'NON PRESENTE')}")
+            print(f"  - p_iva: {safe_azienda.get('p_iva', 'NON PRESENTE')}")
+            print(f"  - telefono: {safe_azienda.get('telefono', 'NON PRESENTE')}")
+            print(f"  - email: {safe_azienda.get('email', 'NON PRESENTE')}")
+            print(f"  - logo_url: {safe_azienda.get('logo_url', 'NON PRESENTE')}")
+            
             # Normalizza logo_url per WeasyPrint (deve essere un path assoluto o URL)
             if safe_azienda.get('logo_url') and safe_azienda['logo_url'].startswith('/uploads/'):
                 # Nel container Docker, i file sono in /app/uploads/
@@ -238,23 +258,42 @@ def genera_pdf_intervento(intervento, azienda_settings) -> bytes:
                     # Usa file:// per WeasyPrint
                     abs_path = str(logo_path.absolute()).replace('\\', '/')
                     safe_azienda['logo_url'] = f"file://{abs_path}"
-                    print(f"Logo trovato: {safe_azienda['logo_url']}")
+                    print(f"✅ Logo trovato: {safe_azienda['logo_url']}")
                 else:
-                    print(f"ATTENZIONE: Logo non trovato. Path cercati: {[str(p) for p in possible_paths]}")
+                    print(f"⚠️ ATTENZIONE: Logo non trovato. Path cercati: {[str(p) for p in possible_paths]}")
                     safe_azienda['logo_url'] = None
+            elif safe_azienda.get('logo_url'):
+                print(f"ℹ️ Logo URL presente ma non in formato /uploads/: {safe_azienda.get('logo_url')}")
+            else:
+                print(f"ℹ️ Nessun logo URL configurato")
             
             # Carica letture copie se è un prelievo copie
+            # Le informazioni dell'asset dovrebbero essere già incluse nelle letture copie
+            # quando vengono caricate prima di chiamare questa funzione
             letture_copie_dettagli = []
             if intervento.is_prelievo_copie and hasattr(intervento, 'letture_copie') and intervento.letture_copie:
                 for lettura in intervento.letture_copie:
                     # Parse delle note per estrarre i dettagli del calcolo
                     note = lettura.note or ""
+                    
+                    # Estrai informazioni asset se disponibili (aggiunte durante il caricamento)
+                    asset_marca = getattr(lettura, 'asset_marca', '') or ''
+                    asset_modello = getattr(lettura, 'asset_modello', '') or ''
+                    asset_marca_modello = getattr(lettura, 'asset_marca_modello', '') or ''
+                    
+                    # Se non disponibili, prova a costruirle da marca e modello
+                    if not asset_marca_modello and (asset_marca or asset_modello):
+                        asset_marca_modello = f"{asset_marca} {asset_modello}".strip() or 'N/A'
+                    
                     letture_copie_dettagli.append({
                         'asset_id': lettura.asset_id,
                         'data_lettura': lettura.data_lettura,
                         'contatore_bn': lettura.contatore_bn,
                         'contatore_colore': lettura.contatore_colore,
-                        'note': note
+                        'note': note,
+                        'asset_marca': asset_marca,
+                        'asset_modello': asset_modello,
+                        'asset_marca_modello': asset_marca_modello or 'N/A'
                     })
             
             # Verifica se è solo prelievo copie (nessun dettaglio o ricambi significativi)

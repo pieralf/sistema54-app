@@ -50,6 +50,16 @@
         </div>
     </div>
 
+    {% if rit.sede_nome or rit.sede_indirizzo %}
+    <div style="margin-bottom: 15px;">
+        <div class="bold" style="margin-bottom: 5px;">SEDE INTERVENTO</div>
+        <div style="border: 1px solid #000; padding: 8px;">
+            {% if rit.sede_nome %}<div><strong>{{ rit.sede_nome }}</strong></div>{% endif %}
+            {% if rit.sede_indirizzo %}<div>{{ rit.sede_indirizzo }}</div>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if rit.is_prelievo_copie and letture_copie_dettagli %}
     <table class="ricambi">
         <thead>
@@ -59,16 +69,18 @@
                 </th>
             </tr>
             <tr>
-                <th width="20%">DATA LETTURA</th>
-                <th width="20%">CONTATORE B/N</th>
-                <th width="20%">CONTATORE COLORE</th>
-                <th width="40%">DETTAGLIO CALCOLO</th>
+                <th width="15%">DATA LETTURA</th>
+                <th width="20%">STAMPANTE/MULTIFUNZIONE</th>
+                <th width="15%">CONTATORE B/N</th>
+                <th width="15%">CONTATORE COLORE</th>
+                <th width="35%">DETTAGLIO CALCOLO</th>
             </tr>
         </thead>
         <tbody>
             {% for lettura in letture_copie_dettagli %}
             <tr>
                 <td class="text-center">{{ lettura.data_lettura.strftime('%d/%m/%Y %H:%M') if lettura.data_lettura.strftime else lettura.data_lettura }}</td>
+                <td class="text-center" style="font-weight: bold;">{{ lettura.asset_marca_modello or 'N/A' }}</td>
                 <td class="text-center">{{ lettura.contatore_bn }}</td>
                 <td class="text-center">{{ lettura.contatore_colore or 0 }}</td>
                 <td style="font-size: 9px; padding: 4px;">
